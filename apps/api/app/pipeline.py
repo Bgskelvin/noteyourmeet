@@ -1,9 +1,11 @@
 """Pipeline pemrosesan satu meeting. Tiap langkah menyimpan hasilnya, jadi bisa diulang dengan aman."""
 
 import gc
+import json
 import logging
 import sys
 import traceback
+from dataclasses import asdict
 from pathlib import Path
 
 from sqlalchemy import delete, select, update
@@ -129,6 +131,9 @@ def process_meeting(meeting_id: int, provider: TranscriptionProvider | None = No
                 on_progress=on_progress,
             )
             _check_cancel(db, m.id)
+            # Simpan hasil mentah (kata + speaker) agar pembagian pembicara bisa dirapikan ulang tanpa GPU
+            raw = {"language": result.language, "segments": [asdict(sg) for sg in result.segments]}
+            (processed.parent / "transcription.json").write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
 
             # 3) Rapikan per pembicara + statistik
             _set(db, m, MeetingStatus.ANALYZING, "Menghitung statistik pembicara")

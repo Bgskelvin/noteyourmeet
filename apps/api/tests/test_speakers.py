@@ -6,20 +6,55 @@ def test_label_for_index():
     assert [label_for_index(i) for i in (0, 1, 25, 26, 27)] == ["A", "B", "Z", "AA", "AB"]
 
 
-def test_split_when_speaker_changes_mid_segment_and_relabel():
-    seg = Segment(
-        speaker="SPEAKER_03", start_ms=0, end_ms=4000, text="halo semua iya halo",
-        words=[
-            Word("halo", 0, 500, "SPEAKER_03"),
-            Word("semua", 500, 1000, "SPEAKER_03"),
-            Word("iya", 2000, 2500, "SPEAKER_01"),
-            Word("halo", 2500, 3000, None),  # ikut speaker sebelumnya
-        ],
+def _seg(speaker: str, *words: tuple[str, str | None], start: int = 0, step: int = 300) -> Segment:
+    """Buat segmen Whisper dengan kata berurutan, masing-masing `step` ms."""
+    ws = [Word(t, start + i * step, start + (i + 1) * step, spk) for i, (t, spk) in enumerate(words)]
+    return Segment(speaker, start, start + len(words) * step, " ".join(t for t, _ in words), words=ws)
+
+
+def test_split_when_speaker_really_changes_mid_segment_and_relabel():
+    seg = _seg(
+        "SPEAKER_03",
+        ("halo", "SPEAKER_03"), ("semua", "SPEAKER_03"), ("apa", "SPEAKER_03"), ("kabar", "SPEAKER_03"),
+        # speaker None = ikut kata sebelumnya
+        ("iya", "SPEAKER_01"), ("baik", "SPEAKER_01"), ("terima", None), ("kasih", "SPEAKER_01"),
     )
     segs, stats = process_segments([seg])
-    assert [(s.speaker, s.text) for s in segs] == [("A", "halo semua"), ("B", "iya halo")]
-    assert segs[1].start_ms == 2000 and segs[1].end_ms == 3000
-    assert {s.label: s.word_count for s in stats} == {"A": 2, "B": 2}
+    assert [(s.speaker, s.text) for s in segs] == [("A", "halo semua apa kabar"), ("B", "iya baik terima kasih")]
+    assert segs[1].start_ms == 1200 and segs[1].end_ms == 2400
+    assert {s.label: s.word_count for s in stats} == {"A": 4, "B": 4}
+
+
+def test_boundary_word_follows_its_sentence():
+    """Kasus nyata: "Gak pada puasa kan? | Gak pada puasa." — kata pertama ikut pembicara sebelumnya."""
+    segs, _ = process_segments([
+        _seg("S1", ("Gak", "S1"), ("pada", "S1"), ("puasa", "S1"), ("kan?", "S1")),
+        _seg("S0", ("Gak", "S1"), ("pada", "S0"), ("puasa.", "S0"), start=2000),
+        _seg("S0", ("Kita", "S1"), ("buka", "S0"), ("dulu", "S0"), ("ya.", "S0"), start=6000),
+    ])
+    assert [(s.speaker, s.text) for s in segs] == [
+        ("A", "Gak pada puasa kan?"),
+        ("B", "Gak pada puasa."),
+        ("B", "Kita buka dulu ya."),
+    ]
+
+
+def test_single_word_sandwiched_is_absorbed_but_fast_exchange_kept():
+    # "nanti aja terakhir [pas] sesi itu" → 1 kata diapit pembicara sama → ikut
+    segs, _ = process_segments([
+        _seg("B", ("nanti", "B"), ("aja", "B"), ("terakhir", "B"), ("pas", "A"), ("sesi", "B"), ("itu", "B")),
+    ])
+    assert [s.text for s in segs] == ["nanti aja terakhir pas sesi itu"]
+
+    # Obrolan cepat dalam kalimat panjang tanpa titik: potongan 2 kata di tengah tetap dipisah
+    segs, _ = process_segments([
+        _seg("X", ("pakaiannya", "X"), ("kudu", "X"), ("formal", "X"), ("nih", "X"),
+             ("santai", "Y"), ("aja", "Y"),
+             ("Rio", "X"), ("ada", "X"), ("kan", "X"), ("Bang", "X")),
+    ])
+    assert [(s.speaker, s.text) for s in segs] == [
+        ("A", "pakaiannya kudu formal nih"), ("B", "santai aja"), ("A", "Rio ada kan Bang"),
+    ]
 
 
 def test_merge_consecutive_same_speaker_and_stats():

@@ -80,3 +80,22 @@ def test_language_per_meeting_and_retry_with_other_language():
         assert c.post(f"/meetings/{mid}/retry", json={"language": "auto"}).status_code == 200
         assert c.get(f"/meetings/{mid}").json()["requested_language"] == "auto"
         assert c.post(f"/meetings/{mid}/retry", json={"language": "xx"}).status_code == 409  # sudah antre
+
+
+def test_raw_transcription_saved_for_later_reanalysis():
+    import json
+
+    from app.config import get_settings
+
+    with TestClient(app) as c:
+        mid = c.post("/meetings", files={"file": ("r.wav", _wav_bytes(1), "audio/wav")}).json()["id"]
+        with SessionLocal() as db:
+            while (got := claim_next(db)) not in (mid, None):
+                process_meeting(got)
+        process_meeting(mid)
+        with SessionLocal() as db:
+            from app.models import Meeting
+
+            folder = (get_settings().storage_dir / db.get(Meeting, mid).audio_path).parent
+        raw = json.loads((folder / "transcription.json").read_text(encoding="utf-8"))
+        assert raw["language"] and len(raw["segments"]) == 5 and "words" in raw["segments"][0]

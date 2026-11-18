@@ -356,7 +356,8 @@ Catatan teknis Claude API (per Nov 2026):
 - [x] Commit pertama ke git
 - [x] Uji rekaman meeting Bahasa Indonesia (user, 86 menit Zoom, 7 pembicara): bahasa santai tertangkap baik; masalah = kata/nama salah dengar (mis. "CSILC" → "CS ALC") & kalimat terbelah antar pembicara
 - [x] Koreksi transkrip: edit kalimat inline (`original_text` disimpan, bisa dikembalikan), cari & ganti semua (kata utuh, dry-run), **Kosakata tim** (`glossary_terms`, halaman /kosakata) → dikirim ke Whisper sebagai `hotwords` (maks 600 karakter)
-- [ ] Kalimat terbelah antar pembicara (mis. "Gak / pada puasa"): perhalus pembagian speaker per kata
+- [x] Kalimat terbelah antar pembicara: `absorb_short_runs()` — 1 kalimat Whisper = 1 pembicara; potongan pendek (<3 kata atau <0,7 dtk) di awal/akhir kalimat ikut tetangga, 1 kata yang diapit pembicara sama ikut; obrolan cepat di tengah tetap dipisah. Uji 5 menit rekaman user: 49 → 34 potongan, "Gak | pada puasa", "Kita | buka dulu", "pas / sesi / online" beres. Meeting lama perlu *Proses ulang*
+- [x] Worker menyimpan `transcription.json` (kata + speaker mentah) per meeting → kelak bisa "rapikan ulang pembicara" tanpa GPU
 - [ ] Auth invite-only (wajib sebelum online)
 
 **Fase 2 — Notulen (± 1 minggu)**
@@ -424,6 +425,7 @@ Fitur Fase 1 lengkap: upload + bahasa per meeting, progres real-time, **batalkan
 | 2026-11-18 | Jalan native di Windows; SQLite + antrean di tabel DB (tanpa Celery/Redis); file di disk lokal | Pemakaian kecil, PC belum ada Docker; lebih sedikit komponen. Upgrade ke Postgres/S3/Docker saat deploy |
 | 2026-11-18 | Login ditunda sampai sebelum online | Fokus pipeline dulu; hanya diakses dari PC sendiri |
 | 2026-11-18 | Pembatalan kooperatif (flag di DB + titik cek di callback progres), `Cancelled` turunan `BaseException` | Tanpa membunuh proses worker; tidak tertelan `except Exception` di library; VRAM bisa dilepas rapi |
+| 2026-11-18 | Pembagian pembicara: per kalimat Whisper, bukan per kata mentah | Diarization meleset ±0,5 dtk di batas giliran → kata pertama/terakhir sering ikut orang sebelumnya. Dibuktikan pada rekaman user |
 | 2026-11-18 | Migrasi skema sederhana `_add_missing_columns()` (tambah kolom nullable) alih-alih Alembic | Cukup untuk SQLite & perubahan kecil; pindah ke Alembic saat ke Postgres |
 | 2026-11-18 | LLM notulen: `claude-opus-5-5`, tugas ringan `claude-haiku-5-5` | Kualitas + konteks 1M |
 | 2026-11-18 | Kosakata tim global dipakai sebagai `hotwords` (bukan `initial_prompt`); model tetap `large-v3-turbo` | Uji 3 menit rekaman Indonesia user: hotwords membetulkan "CSILC"→"CS ALC" tanpa halusinasi, tapi tanda baca berkurang; initial_prompt → tanda baca rapi tapi 30 dtk pertama jadi halusinasi "Terima kasih ×3" (isi hilang). large-v3: "2 menit" benar tapi istilah Inggris lebih buruk ("kanva", "disep") & ±1,5× lebih lambat. Nanti juga dipakai di prompt notulen Claude |
