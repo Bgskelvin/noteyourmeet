@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, isProcessing, LANGUAGES, languageLabel, type MeetingDetail, type Segment, type Speaker } from "@/lib/api";
 import { clock, dateTime, humanDuration, speakerColor } from "@/lib/format";
+import { buildMatcher, countMatches } from "@/lib/textmatch";
 import { PIPELINE_STEPS, StatusBadge } from "./StatusBadge";
 
 export function MeetingView() {
@@ -276,8 +277,38 @@ function TranscriptWorkspace({ m, setM, run }: { m: MeetingDetail; setM: (m: Mee
     a.play().catch(() => {});
   };
 
+  const [showReplace, setShowReplace] = useState(false);
+  const [replaceWith, setReplaceWith] = useState("");
+  const [wholeWord, setWholeWord] = useState(true);
+  const [addToGlossary, setAddToGlossary] = useState(true);
+  const [replacing, setReplacing] = useState(false);
+
   const q = query.trim().toLowerCase();
-  const visible = q ? m.segments.filter((s) => s.text.toLowerCase().includes(q)) : m.segments;
+  const matcher = useMemo(
+    () => (showReplace ? buildMatcher(query, { matchCase: false, wholeWord }) : null),
+    [showReplace, query, wholeWord],
+  );
+  const visible = matcher
+    ? m.segments.filter((s) => s.text.search(new RegExp(matcher.source, matcher.flags.replace("g", ""))) >= 0)
+    : q
+      ? m.segments.filter((s) => s.text.toLowerCase().includes(q))
+      : m.segments;
+  const matchCount = useMemo(() => countMatches(m.segments.map((s) => s.text), matcher), [m.segments, matcher]);
+
+  async function replaceAll() {
+    const find = query.trim();
+    const repl = replaceWith.trim();
+    if (!find || !matchCount) return;
+    if (!confirm(`Ganti ${matchCount} kemunculan "${find}" menjadi "${repl || "(kosong)"}"?`)) return;
+    setReplacing(true);
+    await run(async () => {
+      await api.replaceText(m.id, { find, replace: repl, whole_word: wholeWord });
+      if (addToGlossary && repl) await api.addGlossary(repl);
+      setM(await api.getMeeting(m.id));
+      setQuery(repl);
+    });
+    setReplacing(false);
+  }
 
   function copyTranscript() {
     const txt = m.segments
@@ -308,10 +339,21 @@ function TranscriptWorkspace({ m, setM, run }: { m: MeetingDetail; setM: (m: Mee
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <input
               className="min-w-40 flex-1 rounded-lg border border-neutral-300 bg-transparent px-3 py-1.5 dark:border-neutral-700"
-              placeholder="Cari di transkrip…"
+              placeholder={showReplace ? "Kata yang salah, mis. CSILC" : "Cari di transkrip…"}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
+            <button
+              className={`rounded-lg border px-3 py-1.5 ${
+                showReplace
+                  ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
+                  : "border-neutral-300 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900"
+              }`}
+              onClick={() => setShowReplace((v) => !v)}
+              aria-pressed={showReplace}
+            >
+              Ganti kata
+            </button>
             <label className="flex items-center gap-1.5 text-neutral-600 dark:text-neutral-400">
               <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> Ikuti audio
             </label>
@@ -319,7 +361,37 @@ function TranscriptWorkspace({ m, setM, run }: { m: MeetingDetail; setM: (m: Mee
               {copied ? "Tersalin ✓" : "Salin transkrip"}
             </button>
           </div>
-          {q && <p className="text-xs text-neutral-500">{visible.length} hasil</p>}
+          {showReplace && (
+            <div className="space-y-2 rounded-lg bg-neutral-50 p-3 text-sm dark:bg-neutral-900">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-neutral-500">Ganti dengan</span>
+                <input
+                  className="min-w-40 flex-1 rounded-lg border border-neutral-300 bg-[var(--background)] px-3 py-1.5 dark:border-neutral-700"
+                  placeholder="Kata yang benar, mis. CS ALC"
+                  value={replaceWith}
+                  onChange={(e) => setReplaceWith(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && replaceAll()}
+                />
+                <button
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!matchCount || replacing}
+                  onClick={replaceAll}
+                >
+                  {replacing ? "Mengganti…" : `Ganti semua (${matchCount})`}
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-600 dark:text-neutral-400">
+                <label className="flex items-center gap-1.5">
+                  <input type="checkbox" checked={wholeWord} onChange={(e) => setWholeWord(e.target.checked)} /> Kata utuh saja
+                </label>
+                <label className="flex items-center gap-1.5" title="Agar Whisper menulis kata ini dengan benar di meeting berikutnya">
+                  <input type="checkbox" checked={addToGlossary} onChange={(e) => setAddToGlossary(e.target.checked)} /> Tambahkan kata
+                  yang benar ke Kosakata tim
+                </label>
+              </div>
+            </div>
+          )}
+          {q && <p className="text-xs text-neutral-500">{showReplace ? `${matchCount} kemunculan di ${visible.length} kalimat` : `${visible.length} hasil`}</p>}
         </div>
 
         <ol className="space-y-1">
@@ -332,6 +404,12 @@ function TranscriptWorkspace({ m, setM, run }: { m: MeetingDetail; setM: (m: Mee
               active={s.id === activeId}
               onSeek={() => seek(s.start_ms)}
               onReassign={(spId) => run(async () => setM(await api.reassignSegment(s.id, spId)))}
+              onEdit={(text) =>
+                run(async () => {
+                  setM(await api.editSegment(s.id, text));
+                  return true; // run() mengembalikan undefined bila gagal
+                })
+              }
             />
           ))}
         </ol>
@@ -342,7 +420,7 @@ function TranscriptWorkspace({ m, setM, run }: { m: MeetingDetail; setM: (m: Mee
 }
 
 function SegmentRow({
-  seg, speaker, speakers, active, onSeek, onReassign,
+  seg, speaker, speakers, active, onSeek, onReassign, onEdit,
 }: {
   seg: Segment;
   speaker: Speaker | undefined;
@@ -350,11 +428,27 @@ function SegmentRow({
   active: boolean;
   onSeek: () => void;
   onReassign: (speakerId: number) => void;
+  onEdit: (text: string) => Promise<unknown>;
 }) {
   const [picking, setPicking] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(seg.text);
+  const [saving, setSaving] = useState(false);
   const c = speakerColor(speaker?.label ?? "A");
+
+  async function save(text: string) {
+    const t = text.trim();
+    if (!t || t === seg.text) return setEditing(false);
+    setSaving(true);
+    try {
+      if (await onEdit(t)) setEditing(false); // gagal → tetap di mode edit agar ketikan tidak hilang
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <li id={`seg-${seg.id}`} className={`flex gap-3 rounded-lg px-3 py-2 ${active ? c.soft : "hover:bg-neutral-50 dark:hover:bg-neutral-900/60"}`}>
+    <li id={`seg-${seg.id}`} className={`group flex gap-3 rounded-lg px-3 py-2 ${active ? c.soft : "hover:bg-neutral-50 dark:hover:bg-neutral-900/60"}`}>
       <button onClick={onSeek} className="w-14 shrink-0 pt-0.5 text-left font-mono text-xs text-neutral-500 hover:text-blue-600" title="Putar dari sini">
         {clock(seg.start_ms)}
       </button>
@@ -380,7 +474,60 @@ function SegmentRow({
             {speaker?.display_name ?? "?"}
           </button>
         )}
-        <p className="cursor-pointer leading-relaxed" onClick={onSeek}>{seg.text}</p>
+        {editing ? (
+          <div className="space-y-2">
+            <textarea
+              autoFocus
+              rows={Math.min(8, Math.max(2, Math.ceil(draft.length / 80)))}
+              className="w-full rounded-lg border border-blue-400 bg-transparent px-2 py-1.5 leading-relaxed outline-none focus:ring-2 focus:ring-blue-500/30"
+              value={draft}
+              disabled={saving}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setEditing(false);
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  save(draft);
+                }
+              }}
+            />
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <button className="rounded bg-blue-600 px-2.5 py-1 font-medium text-white hover:bg-blue-700 disabled:opacity-50" disabled={saving} onClick={() => save(draft)}>
+                {saving ? "Menyimpan…" : "Simpan"}
+              </button>
+              <button className="rounded px-2.5 py-1 hover:bg-neutral-100 dark:hover:bg-neutral-800" onClick={() => setEditing(false)}>
+                Batal
+              </button>
+              {seg.original_text && (
+                <button className="rounded px-2.5 py-1 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800" disabled={saving} onClick={() => save(seg.original_text!)}>
+                  Kembalikan teks asli
+                </button>
+              )}
+              <span className="text-neutral-500">Enter = simpan · Shift+Enter = baris baru · Esc = batal</span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-start gap-2">
+            <p className="flex-1 cursor-pointer leading-relaxed" onClick={onSeek}>
+              {seg.text}
+              {seg.original_text && (
+                <span className="ml-1.5 align-middle text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400" title={`Teks asli: ${seg.original_text}`}>
+                  diedit
+                </span>
+              )}
+            </p>
+            <button
+              className="shrink-0 rounded px-1.5 py-0.5 text-xs text-neutral-500 opacity-0 hover:bg-neutral-200 hover:text-neutral-800 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+              title="Perbaiki teks kalimat ini"
+              onClick={() => {
+                setDraft(seg.text);
+                setEditing(true);
+              }}
+            >
+              ✎ Edit
+            </button>
+          </div>
+        )}
       </div>
     </li>
   );

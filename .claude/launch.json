@@ -16,6 +16,16 @@
         "$env:TRANSCRIPTION_PROVIDER='fake'; $env:DATA_DIR=\"$env:TEMP/nym-demo\"; $ff=(Get-ChildItem \"$env:LOCALAPPDATA/Microsoft/WinGet/Packages/Gyan.FFmpeg*/*/bin\")[0].FullName; $env:FFMPEG_BIN=\"$ff/ffmpeg.exe\"; $env:FFPROBE_BIN=\"$ff/ffprobe.exe\"; Set-Location apps/api; .venv/Scripts/python.exe -m uvicorn app.main:app --port 8000"
       ],
       "port": 8000
+    },
+    {
+      "name": "api-copy",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-Command",
+        "$env:DATA_DIR=\"$env:TEMP/nym-ui-test\"; Set-Location apps/api; .venv/Scripts/python.exe -m uvicorn app.main:app --port 8000"
+      ],
+      "port": 8000
     }
   ]
 }

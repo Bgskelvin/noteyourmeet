@@ -11,7 +11,15 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import PROCESSING_STATUSES, Meeting, MeetingStatus, Speaker, TranscriptSegment, utcnow
+from app.models import (
+    PROCESSING_STATUSES,
+    GlossaryTerm,
+    Meeting,
+    MeetingStatus,
+    Speaker,
+    TranscriptSegment,
+    utcnow,
+)
 from app.services import audio
 from app.services.speakers import process_segments
 from app.services.transcription import TranscriptionProvider, get_provider
@@ -117,6 +125,7 @@ def process_meeting(meeting_id: int, provider: TranscriptionProvider | None = No
                 language=m.requested_language or s.whisper_language,  # "auto" = deteksi otomatis
                 min_speakers=m.min_speakers,
                 max_speakers=m.max_speakers,
+                hotwords=list(db.scalars(select(GlossaryTerm.term).order_by(GlossaryTerm.term))),
                 on_progress=on_progress,
             )
             _check_cancel(db, m.id)

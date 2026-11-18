@@ -21,6 +21,7 @@ class FakeProvider:
         language: str | None,
         min_speakers: int | None,
         max_speakers: int | None,
+        hotwords: list[str] | None = None,
         on_progress: ProgressFn,
     ) -> TranscriptionResult:
         on_progress("Transkripsi palsu (mode fake)")

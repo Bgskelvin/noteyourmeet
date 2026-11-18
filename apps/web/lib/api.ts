@@ -37,6 +37,8 @@ export interface Segment {
   start_ms: number;
   end_ms: number;
   text: string;
+  /** Terisi bila kalimat sudah diedit manual (berisi teks asli dari AI). */
+  original_text: string | null;
 }
 
 export interface MeetingDetail extends MeetingSummary {
@@ -48,6 +50,19 @@ export interface MeetingDetail extends MeetingSummary {
   processing_finished_at: string | null;
   speakers: Speaker[];
   segments: Segment[];
+}
+
+export interface GlossaryTerm {
+  id: number;
+  term: string;
+}
+
+export interface ReplaceRequest {
+  find: string;
+  replace: string;
+  match_case?: boolean;
+  whole_word?: boolean;
+  dry_run?: boolean;
 }
 
 export const isProcessing = (s: MeetingStatus) => s !== "DONE" && s !== "FAILED" && s !== "CANCELLED";
@@ -101,6 +116,17 @@ export const api = {
     }),
   reassignSegment: (segmentId: number, speakerId: number) =>
     request<MeetingDetail>(`/segments/${segmentId}/speaker?speaker_id=${speakerId}`, { method: "POST" }),
+  editSegment: (segmentId: number, text: string) =>
+    request<MeetingDetail>(`/segments/${segmentId}`, { method: "PATCH", body: JSON.stringify({ text }) }),
+  replaceText: (meetingId: number, body: ReplaceRequest) =>
+    request<{ matches: number; segments_changed: number }>(`/meetings/${meetingId}/replace`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  listGlossary: () => request<GlossaryTerm[]>("/glossary"),
+  addGlossary: (term: string) =>
+    request<GlossaryTerm[]>("/glossary", { method: "POST", body: JSON.stringify({ term }) }),
+  deleteGlossary: (id: number) => request<void>(`/glossary/${id}`, { method: "DELETE" }),
   audioUrl: (id: number) => `${API_URL}/meetings/${id}/audio`,
 };
 

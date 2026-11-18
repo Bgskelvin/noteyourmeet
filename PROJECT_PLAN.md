@@ -354,7 +354,9 @@ Catatan teknis Claude API (per Nov 2026):
 - [x] Bahasa per meeting: pilihan Indonesia/English/Otomatis saat upload & saat proses ulang (kolom `requested_language`, migrasi otomatis `_add_missing_columns`)
 - [x] Tombol Batalkan: antre → langsung batal; sedang diproses → `cancel_requested_at`, worker cek di tiap progres (≈5%) & antar langkah, lalu `CANCELLED` + VRAM dilepas (uji GPU: berhenti 6 dtk, VRAM 432→44 MB). "Paksa batalkan" setelah 60 dtk. Worker restart: yang diminta batal → `CANCELLED`, bukan diantrekan ulang
 - [x] Commit pertama ke git
-- [ ] Uji rekaman meeting Bahasa Indonesia
+- [x] Uji rekaman meeting Bahasa Indonesia (user, 86 menit Zoom, 7 pembicara): bahasa santai tertangkap baik; masalah = kata/nama salah dengar (mis. "CSILC" → "CS ALC") & kalimat terbelah antar pembicara
+- [x] Koreksi transkrip: edit kalimat inline (`original_text` disimpan, bisa dikembalikan), cari & ganti semua (kata utuh, dry-run), **Kosakata tim** (`glossary_terms`, halaman /kosakata) → dikirim ke Whisper sebagai `hotwords` (maks 600 karakter)
+- [ ] Kalimat terbelah antar pembicara (mis. "Gak / pada puasa"): perhalus pembagian speaker per kata
 - [ ] Auth invite-only (wajib sebelum online)
 
 **Fase 2 — Notulen (± 1 minggu)**
@@ -391,7 +393,7 @@ Fitur Fase 1 lengkap: upload + bahasa per meeting, progres real-time, **batalkan
 
 **Urutan kerja yang disepakati (2026-11-18):**
 1. ~~Rapikan: tombol Batalkan + commit git~~ ✅
-2. User uji rekaman meeting **Bahasa Indonesia**; sesuaikan `WHISPER_COMPUTE_TYPE` / `WHISPER_BATCH_SIZE` / `WHISPER_MODEL` bila hasil kurang.
+2. ~~User uji rekaman meeting Bahasa Indonesia~~ ✅ → ditambah edit kalimat, cari & ganti, Kosakata tim (hotwords). User perlu mengisi Kosakata tim (nama anggota, singkatan, produk).
 3. **Fase 2: notulen dengan Claude** — user perlu API key Anthropic + saldo (± $5 cukup puluhan meeting).
 4. Export & berbagi (copy WhatsApp, Markdown, Word, PDF).
 5. Login undangan-saja + online via Cloudflare Tunnel.
@@ -424,3 +426,4 @@ Fitur Fase 1 lengkap: upload + bahasa per meeting, progres real-time, **batalkan
 | 2026-11-18 | Pembatalan kooperatif (flag di DB + titik cek di callback progres), `Cancelled` turunan `BaseException` | Tanpa membunuh proses worker; tidak tertelan `except Exception` di library; VRAM bisa dilepas rapi |
 | 2026-11-18 | Migrasi skema sederhana `_add_missing_columns()` (tambah kolom nullable) alih-alih Alembic | Cukup untuk SQLite & perubahan kecil; pindah ke Alembic saat ke Postgres |
 | 2026-11-18 | LLM notulen: `claude-opus-5-5`, tugas ringan `claude-haiku-5-5` | Kualitas + konteks 1M |
+| 2026-11-18 | Kosakata tim global (bukan per meeting) dipakai sebagai `hotwords` faster-whisper, bukan `initial_prompt` | hotwords khusus untuk ejaan istilah; initial_prompt bisa memengaruhi gaya / memicu halusinasi. Nanti juga dipakai di prompt notulen Claude |

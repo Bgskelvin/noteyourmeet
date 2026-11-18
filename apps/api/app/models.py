@@ -92,6 +92,18 @@ class TranscriptSegment(Base):
     start_ms: Mapped[int] = mapped_column(Integer)
     end_ms: Mapped[int] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(Text)
+    # Teks asli hasil AI, diisi saat pertama kali diedit manual (agar bisa dikembalikan)
+    original_text: Mapped[str | None] = mapped_column(Text)
     confidence: Mapped[float | None] = mapped_column(Float)
 
     meeting: Mapped[Meeting] = relationship(back_populates="segments")
+
+
+class GlossaryTerm(Base):
+    """Kosakata tim: nama orang, singkatan, istilah — dipakai sebagai 'hotwords' Whisper."""
+
+    __tablename__ = "glossary_terms"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    term: Mapped[str] = mapped_column(String(100), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

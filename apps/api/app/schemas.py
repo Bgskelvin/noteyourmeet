@@ -33,6 +33,35 @@ class SegmentOut(BaseModel):
     start_ms: int
     end_ms: int
     text: str
+    original_text: str | None = None  # terisi = kalimat ini sudah diedit manual
+
+
+class SegmentUpdate(BaseModel):
+    text: str = Field(min_length=1, max_length=20_000)
+
+
+class ReplaceRequest(BaseModel):
+    find: str = Field(min_length=1, max_length=200)
+    replace: str = Field(max_length=200)
+    match_case: bool = False
+    whole_word: bool = True
+    dry_run: bool = False  # true = hanya hitung, tidak mengubah
+
+
+class ReplaceResult(BaseModel):
+    matches: int
+    segments_changed: int
+
+
+class GlossaryTermOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    term: str
+
+
+class GlossaryTermIn(BaseModel):
+    term: str = Field(min_length=1, max_length=100)
 
 
 class MeetingSummary(BaseModel):

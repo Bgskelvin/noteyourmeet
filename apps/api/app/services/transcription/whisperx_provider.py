@@ -39,6 +39,21 @@ def _pct(on_progress: ProgressFn, label: str):
     return cb
 
 
+HOTWORDS_MAX_CHARS = 600  # hotwords ikut memakan jatah konteks Whisper (±224 token); jaga tetap pendek
+
+
+def _hotwords_text(terms: list[str]) -> str:
+    """Gabungkan kosakata tim jadi teks hotwords, dipotong agar tidak melebihi batas konteks."""
+    out = ""
+    for t in terms:
+        nxt = f"{out}, {t}" if out else t
+        if len(nxt) > HOTWORDS_MAX_CHARS:
+            log.warning("Kosakata tim terlalu panjang; sebagian tidak dipakai sebagai hotwords")
+            break
+        out = nxt
+    return out
+
+
 def _load_wav_16k(path: Path):
     """Baca WAV 16 kHz mono PCM16 hasil pipeline (tanpa memanggil ffmpeg lagi) → float32 [-1, 1]."""
     import wave
@@ -78,6 +93,7 @@ class WhisperXProvider:
         language: str | None,
         min_speakers: int | None,
         max_speakers: int | None,
+        hotwords: list[str] | None = None,
         on_progress: ProgressFn,
     ) -> TranscriptionResult:
         import whisperx
@@ -96,7 +112,10 @@ class WhisperXProvider:
         audio = _load_wav_16k(audio_path)
 
         # 1) Teks
-        on_progress(f"Memuat model {s.whisper_model} (pertama kali: unduh ±1,5 GB)")
+        asr_options = {"hotwords": _hotwords_text(hotwords)} if hotwords else None
+        model = whisperx.load_model(
+            s.whisper_model, device, compute_type=s.whisper_compute_type, language=lang, asr_options=asr_options
+        )
         model = whisperx.load_model(s.whisper_model, device, compute_type=s.whisper_compute_type, language=lang)
         result = model.transcribe(
             audio, batch_size=s.whisper_batch_size, language=lang,

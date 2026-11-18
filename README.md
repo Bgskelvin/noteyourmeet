@@ -45,6 +45,12 @@ Dokumentasi API: http://localhost:8000/docs.
 
 Pertama kali memproses, worker mengunduh model (±3 GB total) ke cache Hugging Face — sekali saja.
 
+### Memperbaiki kata yang salah
+- **Edit satu kalimat:** arahkan kursor ke kalimat → klik **✎ Edit** → Enter untuk simpan. Teks asli AI tetap tersimpan (tanda *diedit*, bisa *Kembalikan teks asli*).
+- **Ganti kata di seluruh transkrip:** klik **Ganti kata**, isi kata yang salah & yang benar → **Ganti semua**.
+- **Kosakata tim** (menu atas): daftar nama orang, singkatan, istilah. Whisper memprioritaskan ejaan ini
+  untuk meeting yang diproses berikutnya — mencegah kesalahan yang sama terulang.
+
 ### Membatalkan proses
 Di halaman meeting yang sedang diproses, klik **Batalkan**. Worker berhenti di titik cek berikutnya
 (biasanya beberapa detik; teruji: 6 dtk saat transkripsi 40%), GPU dibebaskan, status jadi **Dibatalkan**.

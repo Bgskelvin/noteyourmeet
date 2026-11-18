@@ -1,4 +1,5 @@
 import logging
+import re
 import shutil
 import uuid
 from contextlib import asynccontextmanager
@@ -13,16 +14,30 @@ from sqlalchemy.orm import Session, selectinload
 from app.config import get_settings
 from app.db import get_db, init_db
 from app.languages import WHISPER_LANGUAGES
-from app.models import PROCESSING_STATUSES, Meeting, MeetingStatus, Speaker, TranscriptSegment, utcnow
+from app.models import (
+    PROCESSING_STATUSES,
+    GlossaryTerm,
+    Meeting,
+    MeetingStatus,
+    Speaker,
+    TranscriptSegment,
+    utcnow,
+)
 from app.schemas import (
+    GlossaryTermIn,
+    GlossaryTermOut,
     MeetingDetail,
     MeetingSummary,
     MeetingUpdate,
+    ReplaceRequest,
+    ReplaceResult,
     RetryRequest,
+    SegmentUpdate,
     SpeakerMerge,
     SpeakerOut,
     SpeakerUpdate,
 )
+from app.services.corrections import build_pattern, normalize_term, replace_in_text
 from app.services.speakers import CleanSegment, compute_stats
 
 logging.basicConfig(level=logging.INFO)
@@ -300,3 +315,84 @@ def reassign_segment(segment_id: int, speaker_id: int, db: Session = Depends(get
     db.commit()
     db.expire_all()
     return _get_meeting(db, m.id, full=True)
+
+
+# ---------- Koreksi transkrip ----------
+
+@app.patch("/segments/{segment_id}", response_model=MeetingDetail)
+def edit_segment(segment_id: int, body: SegmentUpdate, db: Session = Depends(get_db)) -> Meeting:
+    """Edit teks satu kalimat. Teks asli AI disimpan di original_text agar bisa dikembalikan."""
+    seg = db.get(TranscriptSegment, segment_id)
+    if seg is None:
+        raise HTTPException(404, "Kalimat tidak ditemukan")
+    new = body.text.strip()
+    if seg.original_text is None and new != seg.text:
+        seg.original_text = seg.text
+    seg.text = new
+    if seg.original_text == new:  # dikembalikan ke teks asli
+        seg.original_text = None
+    m = _get_meeting(db, seg.meeting_id)
+    db.flush()
+    _recompute_stats(db, m)
+    db.commit()
+    db.expire_all()
+    return _get_meeting(db, m.id, full=True)
+
+
+@app.post("/meetings/{meeting_id}/replace", response_model=ReplaceResult)
+def replace_text(meeting_id: int, body: ReplaceRequest, db: Session = Depends(get_db)) -> ReplaceResult:
+    """Cari & ganti kata di seluruh transkrip (mis. 'CSILC' → 'CS ALC'). dry_run=true hanya menghitung."""
+    m = _get_meeting(db, meeting_id)
+    pattern = build_pattern(body.find, match_case=body.match_case, whole_word=body.whole_word)
+    replacement = body.replace.strip()
+    matches = changed = 0
+    segs = db.scalars(select(TranscriptSegment).where(TranscriptSegment.meeting_id == m.id))
+    for seg in segs:
+        new, n = replace_in_text(seg.text, pattern, replacement)
+        if not n:
+            continue
+        matches += n
+        new = " ".join(new.split())
+        if body.dry_run or new == seg.text:
+            continue
+        if not new:
+            continue  # jangan sampai kalimat jadi kosong
+        if seg.original_text is None:
+            seg.original_text = seg.text
+        seg.text = new
+        if seg.original_text == new:
+            seg.original_text = None
+        changed += 1
+    if not body.dry_run and changed:
+        db.flush()
+        _recompute_stats(db, m)
+        db.commit()
+    return ReplaceResult(matches=matches, segments_changed=changed)
+
+
+# ---------- Kosakata tim (hotwords Whisper) ----------
+
+@app.get("/glossary", response_model=list[GlossaryTermOut])
+def list_glossary(db: Session = Depends(get_db)) -> list[GlossaryTerm]:
+    return list(db.scalars(select(GlossaryTerm).order_by(GlossaryTerm.term)))
+
+
+@app.post("/glossary", response_model=list[GlossaryTermOut], status_code=201)
+def add_glossary(body: GlossaryTermIn, db: Session = Depends(get_db)) -> list[GlossaryTerm]:
+    """Tambah satu atau beberapa istilah sekaligus (pisahkan dengan koma atau baris baru)."""
+    existing = {t.lower() for t in db.scalars(select(GlossaryTerm.term))}
+    for raw in re.split(r"[,\n]", body.term):
+        term = normalize_term(raw)
+        if term and len(term) <= 100 and term.lower() not in existing:
+            db.add(GlossaryTerm(term=term))
+            existing.add(term.lower())
+    db.commit()
+    return list_glossary(db)
+
+
+@app.delete("/glossary/{term_id}", status_code=204)
+def delete_glossary(term_id: int, db: Session = Depends(get_db)) -> None:
+    t = db.get(GlossaryTerm, term_id)
+    if t is not None:
+        db.delete(t)
+        db.commit()
