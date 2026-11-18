@@ -1,0 +1,14 @@
+# env & secrets
+.env
+*.env.local
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+# data (database, audio)
+apps/api/data/
+# node
+node_modules/
+.next/
