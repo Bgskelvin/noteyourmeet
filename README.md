@@ -77,6 +77,50 @@ Set `TRANSCRIPTION_PROVIDER=fake` di `apps/api/.env` → worker menghasilkan tra
 cd apps\api; .venv\Scripts\python -m pytest
 cd apps\web; npm run lint
 ```
+Di GitHub, test yang sama berjalan otomatis setiap `git push` (`.github/workflows/ci.yml`, tanpa GPU).
+
+## Alur kerja pengembangan
+
+```
+Ada masalah / ide
+  → lihat log (apps/api/data/logs/) + "Detail proses" di halaman meeting
+  → perbaiki kode + tambah test untuk kasus itu
+  → ukur dengan set uji kualitas → angkanya membaik?
+  → commit + git push → test otomatis di GitHub
+  → catat di PROJECT_PLAN.md (status & log keputusan)
+```
+
+### Log
+API & worker menulis log ke `apps/api/data/logs/api.log` dan `worker.log` (maks 5 MB × 6 file, dirotasi).
+Saat melaporkan error, lampirkan bagian log di sekitar waktu kejadian.
+
+### Detail proses per meeting
+Di bawah halaman meeting ada **Detail proses**: model, pengaturan, bahasa, kosakata, versi kode (commit git),
+dan durasi tiap langkah. Gunakan untuk tahu *kenapa* sebuah hasil berbeda dari yang lain.
+
+### Set uji kualitas (angka, bukan perasaan)
+1. Pilih potongan **±5 menit** (lebih panjang lebih baik untuk menilai pembicara) dari meeting asli,
+   lalu **koreksi sampai benar** di aplikasi: teks (✎ Edit / Ganti kata) dan pembicara (nama, gabung, pindah kalimat).
+2. Jadikan acuan:
+   ```powershell
+   cd apps\api; .venv\Scripts\python -m app.evaluate add 2 --start 1:40 --end 6:40 --name alc-pembukaan
+   ```
+3. Ukur (pakai GPU): `.venv\Scripts\python -m app.evaluate run --note "baseline"`
+4. Setelah mengubah pengaturan/kosakata/model, ukur lagi dengan `--note` berbeda dan bandingkan:
+   `.venv\Scripts\python -m app.evaluate history`
+5. Jika yang diubah **hanya aturan pembagian pembicara**, pakai `--cached` (tanpa GPU, beberapa detik).
+
+Skor: **Salah kata** (WER) dan **Salah pembicara** (% waktu bicara yang diberikan ke orang yang salah) — makin kecil makin baik.
+Data set uji di `apps/api/data/evalset/` — berisi rekaman pribadi, **tidak** ikut git.
+
+### Backup
+```powershell
+cd apps\api
+.venv\Scripts\python -m app.backup --dest "D:\Backup NYM"      # sebaiknya disk lain / folder OneDrive / Google Drive
+.venv\Scripts\python -m app.backup --dest "D:\Backup NYM" --with-audio   # ikut rekaman asli (besar)
+```
+Berisi database, transkrip mentah, dan (opsional) rekaman asli; menyimpan 10 backup terbaru.
+**Restore:** tutup aplikasi → ekstrak zip ke `apps/api/data` → jalankan lagi.
 
 ## Masalah umum
 

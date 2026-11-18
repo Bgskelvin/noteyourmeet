@@ -340,7 +340,8 @@ Catatan teknis Claude API (per Nov 2026):
 - [x] Init monorepo + git (belum ada commit), `.gitignore`
 - [x] Skeleton FastAPI + healthcheck; Next.js 16 + Tailwind
 - [x] `.env.example`, ruff, eslint, pytest
-- [ ] docker-compose (ditunda — jalan native Windows dulu), Alembic (pakai `create_all` dulu), CI
+- [x] CI GitHub Actions (`.github/workflows/ci.yml`: ruff + pytest + eslint + tsc, tanpa GPU) — aktif setelah repo di-push ke GitHub
+- [ ] docker-compose (ditunda — jalan native Windows dulu), Alembic (pakai `create_all` dulu)
 
 **Fase 1 — Inti pipeline (audio → teks + siapa bicara)**
 - [x] Upload file (API simpan ke disk) + model `meetings`, `speakers`, `transcript_segments`
@@ -358,6 +359,9 @@ Catatan teknis Claude API (per Nov 2026):
 - [x] Koreksi transkrip: edit kalimat inline (`original_text` disimpan, bisa dikembalikan), cari & ganti semua (kata utuh, dry-run), **Kosakata tim** (`glossary_terms`, halaman /kosakata) → dikirim ke Whisper sebagai `hotwords` (maks 600 karakter)
 - [x] Kalimat terbelah antar pembicara: `absorb_short_runs()` — 1 kalimat Whisper = 1 pembicara; potongan pendek (<3 kata atau <0,7 dtk) di awal/akhir kalimat ikut tetangga, 1 kata yang diapit pembicara sama ikut; obrolan cepat di tengah tetap dipisah. Uji 5 menit rekaman user: 49 → 34 potongan, "Gak | pada puasa", "Kita | buka dulu", "pas / sesi / online" beres. Meeting lama perlu *Proses ulang*
 - [x] Worker menyimpan `transcription.json` (kata + speaker mentah) per meeting → kelak bisa "rapikan ulang pembicara" tanpa GPU
+- [x] Fondasi pengembangan: log ke file (`data/logs`), backup (`python -m app.backup`), resep pemrosesan per meeting (`processing_info` + "Detail proses" di UI), set uji kualitas (`python -m app.evaluate`: WER & salah pembicara, `--cached` tanpa GPU)
+- [ ] Push repo ke GitHub (private) — menunggu user membuat repo
+- [ ] User membuat set uji: 2–3 potongan ±5 menit yang sudah dikoreksi, lalu `evaluate run --note baseline`
 - [ ] Auth invite-only (wajib sebelum online)
 
 **Fase 2 — Notulen (± 1 minggu)**
@@ -392,6 +396,8 @@ Catatan teknis Claude API (per Nov 2026):
 
 Fitur Fase 1 lengkap: upload + bahasa per meeting, progres real-time, **batalkan**, proses ulang, transkrip + pembicara (rename/gabung/pindah kalimat), statistik. Kode sudah di-commit ke git (branch `master`).
 
+**Alur kerja pengembangan** (detail: README → "Alur kerja pengembangan"): masalah/ide → cek log + Detail proses → perbaiki + tambah test → ukur dengan `app.evaluate` → commit + push (CI) → catat di dokumen ini.
+
 **Urutan kerja yang disepakati (2026-11-18):**
 1. ~~Rapikan: tombol Batalkan + commit git~~ ✅
 2. ~~User uji rekaman meeting Bahasa Indonesia~~ ✅ → ditambah edit kalimat, cari & ganti, Kosakata tim (hotwords). User perlu mengisi Kosakata tim (nama anggota, singkatan, produk).
@@ -409,8 +415,9 @@ Fitur Fase 1 lengkap: upload + bahasa per meeting, progres real-time, **batalkan
 
 **Yang perlu disiapkan user:**
 - [ ] API key Anthropic (console.anthropic.com)
-- [ ] Akun & token Hugging Face; setujui syarat `pyannote/speaker-diarization-3.1` dan `pyannote/segmentation-3.0`
-- [ ] Driver NVIDIA terbaru + Docker Desktop (WSL2) → uji `docker run --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi`
+- [x] Akun & token Hugging Face (sudah, model `pyannote/speaker-diarization-community-1`)
+- [ ] Akun GitHub + repo **private** kosong (untuk backup kode & CI)
+- [ ] (Nanti, saat deploy) Docker Desktop (WSL2) — belum perlu selama jalan native
 - [ ] (Saat deploy) akun Cloudflare + domain (bisa domain murah)
 
 **Pertanyaan terbuka:** rata-rata durasi & jumlah meeting per minggu (untuk estimasi antrean GPU).
@@ -426,6 +433,7 @@ Fitur Fase 1 lengkap: upload + bahasa per meeting, progres real-time, **batalkan
 | 2026-11-18 | Login ditunda sampai sebelum online | Fokus pipeline dulu; hanya diakses dari PC sendiri |
 | 2026-11-18 | Pembatalan kooperatif (flag di DB + titik cek di callback progres), `Cancelled` turunan `BaseException` | Tanpa membunuh proses worker; tidak tertelan `except Exception` di library; VRAM bisa dilepas rapi |
 | 2026-11-18 | Pembagian pembicara: per kalimat Whisper, bukan per kata mentah | Diarization meleset ±0,5 dtk di batas giliran → kata pertama/terakhir sering ikut orang sebelumnya. Dibuktikan pada rekaman user |
+| 2026-11-18 | Kualitas diukur dengan set uji (WER + salah pembicara berbasis waktu, pemetaan label via overlap) dari potongan meeting asli yang dikoreksi user | Perubahan model/kosakata/aturan dinilai dengan angka. Uji GPU: potongan 1 menit diproses sendiri hanya terdeteksi 2 dari 5 pembicara → potongan uji harus ±5 menit &/atau isi min/maks peserta |
 | 2026-11-18 | Migrasi skema sederhana `_add_missing_columns()` (tambah kolom nullable) alih-alih Alembic | Cukup untuk SQLite & perubahan kecil; pindah ke Alembic saat ke Postgres |
 | 2026-11-18 | LLM notulen: `claude-opus-5-5`, tugas ringan `claude-haiku-5-5` | Kualitas + konteks 1M |
 | 2026-11-18 | Kosakata tim global dipakai sebagai `hotwords` (bukan `initial_prompt`); model tetap `large-v3-turbo` | Uji 3 menit rekaman Indonesia user: hotwords membetulkan "CSILC"→"CS ALC" tanpa halusinasi, tapi tanda baca berkurang; initial_prompt → tanda baca rapi tapi 30 dtk pertama jadi halusinasi "Terima kasih ×3" (isi hilang). large-v3: "2 menit" benar tapi istilah Inggris lebih buruk ("kanva", "disep") & ±1,5× lebih lambat. Nanti juga dipakai di prompt notulen Claude |

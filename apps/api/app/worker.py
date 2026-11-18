@@ -9,6 +9,7 @@ import time
 
 from app.config import get_settings
 from app.db import SessionLocal, init_db
+from app.logging_setup import setup_logging
 from app.pipeline import claim_next, process_meeting, requeue_stuck
 from app.services.transcription import get_provider
 
@@ -23,7 +24,7 @@ def _handle_stop(*_):
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    setup_logging("worker")
     signal.signal(signal.SIGINT, _handle_stop)
     signal.signal(signal.SIGTERM, _handle_stop)
     s = get_settings()

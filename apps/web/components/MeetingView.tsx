@@ -3,7 +3,16 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, isProcessing, LANGUAGES, languageLabel, type MeetingDetail, type Segment, type Speaker } from "@/lib/api";
+import {
+  api,
+  isProcessing,
+  LANGUAGES,
+  languageLabel,
+  type MeetingDetail,
+  type ProcessingInfo,
+  type Segment,
+  type Speaker,
+} from "@/lib/api";
 import { clock, dateTime, humanDuration, speakerColor } from "@/lib/format";
 import { buildMatcher, countMatches } from "@/lib/textmatch";
 import { PIPELINE_STEPS, StatusBadge } from "./StatusBadge";
@@ -124,7 +133,37 @@ export function MeetingView() {
         </div>
       )}
       {m.status === "DONE" && <TranscriptWorkspace m={m} setM={setM} run={run} />}
+      {!busy && m.processing_info && <ProcessingInfoPanel info={m.processing_info} />}
     </div>
+  );
+}
+
+function ProcessingInfoPanel({ info }: { info: ProcessingInfo }) {
+  const t = info.timings_sec ?? {};
+  const rows: [string, React.ReactNode][] = [
+    ["Versi kode", info.code_version ?? "–"],
+    ["Mesin transkripsi", `${info.provider ?? "–"} · ${info.whisper_model ?? "–"} (${info.compute_type ?? "–"}, batch ${info.batch_size ?? "–"}, ${info.device ?? "–"})`],
+    ["Bahasa", `diminta: ${languageLabel(info.language_requested)} · terdeteksi: ${languageLabel(info.language_detected)}`],
+    ["Model timestamp kata", info.align_model ?? "–"],
+    ["Perkiraan peserta", info.min_speakers || info.max_speakers ? `${info.min_speakers ?? "?"}–${info.max_speakers ?? "?"}` : "otomatis"],
+    ["Kosakata tim", info.hotwords?.length ? info.hotwords.join(", ") : "(kosong)"],
+    ["Aturan pembicara", info.speaker_rules ? `potongan < ${info.speaker_rules.min_run_words} kata / < ${info.speaker_rules.min_run_ms} ms ikut tetangga` : "–"],
+    ["Durasi proses", ["preprocess", "transcribe", "analyze"].map((k) => `${k}: ${t[k as keyof typeof t] ?? "–"} dtk`).join(" · ")],
+  ];
+  return (
+    <details className="rounded-xl border border-neutral-200 text-sm dark:border-neutral-800">
+      <summary className="cursor-pointer select-none px-4 py-2.5 text-neutral-600 dark:text-neutral-400">
+        Detail proses <span className="text-xs">(untuk melacak masalah & membandingkan hasil)</span>
+      </summary>
+      <dl className="grid gap-x-6 gap-y-1.5 border-t border-neutral-200 px-4 py-3 sm:grid-cols-[max-content_1fr] dark:border-neutral-800">
+        {rows.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="text-neutral-500">{k}</dt>
+            <dd className="break-words font-mono text-xs leading-5">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }
 

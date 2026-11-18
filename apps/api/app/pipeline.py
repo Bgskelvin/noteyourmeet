@@ -4,6 +4,7 @@ import gc
 import json
 import logging
 import sys
+import time
 import traceback
 from dataclasses import asdict
 from pathlib import Path
@@ -23,8 +24,9 @@ from app.models import (
     utcnow,
 )
 from app.services import audio
-from app.services.speakers import process_segments
+from app.services.speakers import MIN_RUN_MS, MIN_RUN_WORDS, process_segments
 from app.services.transcription import TranscriptionProvider, get_provider
+from app.version import code_version
 
 log = logging.getLogger(__name__)
 
@@ -100,6 +102,25 @@ def process_meeting(meeting_id: int, provider: TranscriptionProvider | None = No
         m = db.get(Meeting, meeting_id)
         if m is None:
             return
+        hotwords = list(db.scalars(select(GlossaryTerm.term).order_by(GlossaryTerm.term)))
+        # "Resep" pemrosesan: dicatat per meeting agar hasil bisa dilacak & dibandingkan
+        info: dict = {
+            "code_version": code_version(),
+            "provider": s.transcription_provider,
+            "whisper_model": s.whisper_model,
+            "compute_type": s.whisper_compute_type,
+            "batch_size": s.whisper_batch_size,
+            "device": s.whisper_device,
+            "language_requested": m.requested_language or s.whisper_language,
+            "align_model": s.align_model or "default",
+            "hotwords": hotwords,
+            "min_speakers": m.min_speakers,
+            "max_speakers": m.max_speakers,
+            "speaker_rules": {"min_run_words": MIN_RUN_WORDS, "min_run_ms": MIN_RUN_MS},
+            "timings_sec": {},
+        }
+        m.processing_info = json.dumps(info, ensure_ascii=False)
+        t0 = time.monotonic()
         try:
             # 1) Pra-proses audio
             _set(db, m, MeetingStatus.PREPROCESSING, "Mengonversi audio (ffmpeg)")
@@ -110,6 +131,9 @@ def process_meeting(meeting_id: int, provider: TranscriptionProvider | None = No
                 audio.to_wav_16k_mono(src, processed)
             m.processed_audio_path = processed_rel
             m.duration_sec = audio.probe_duration(processed)
+            info["timings_sec"]["preprocess"] = round(time.monotonic() - t0, 1)
+            t0 = time.monotonic()
+            m.processing_info = json.dumps(info, ensure_ascii=False)
             db.commit()
             _check_cancel(db, m.id)
 
@@ -127,10 +151,12 @@ def process_meeting(meeting_id: int, provider: TranscriptionProvider | None = No
                 language=m.requested_language or s.whisper_language,  # "auto" = deteksi otomatis
                 min_speakers=m.min_speakers,
                 max_speakers=m.max_speakers,
-                hotwords=list(db.scalars(select(GlossaryTerm.term).order_by(GlossaryTerm.term))),
+                hotwords=hotwords,
                 on_progress=on_progress,
             )
             _check_cancel(db, m.id)
+            info["timings_sec"]["transcribe"] = round(time.monotonic() - t0, 1)
+            t0 = time.monotonic()
             # Simpan hasil mentah (kata + speaker) agar pembagian pembicara bisa dirapikan ulang tanpa GPU
             raw = {"language": result.language, "segments": [asdict(sg) for sg in result.segments]}
             (processed.parent / "transcription.json").write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
@@ -158,6 +184,9 @@ def process_meeting(meeting_id: int, provider: TranscriptionProvider | None = No
             )
             m.language = result.language
             m.speaker_count = len(speakers)
+            info["timings_sec"]["analyze"] = round(time.monotonic() - t0, 1)
+            info["language_detected"] = result.language
+            m.processing_info = json.dumps(info, ensure_ascii=False)
             m.processing_finished_at = utcnow()
             db.flush()
             _check_cancel(db, m.id)  # batal di detik terakhir → jangan timpa jadi DONE

@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, Json
 
 from app.models import MeetingStatus
 
@@ -82,6 +82,7 @@ class MeetingSummary(BaseModel):
 class MeetingDetail(MeetingSummary):
     language: str | None  # bahasa yang dipakai/terdeteksi saat transkripsi
     requested_language: str | None  # pilihan user: "id", "en", "auto", ...
+    processing_info: Json[dict] | None = None  # resep pemrosesan (disimpan sebagai teks JSON)
     min_speakers: int | None
     max_speakers: int | None
     processing_started_at: UtcDatetime | None

@@ -58,6 +58,8 @@ class Meeting(Base):
     processing_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Diisi saat user menekan "Batalkan" ketika worker sedang memproses; worker mengeceknya berkala
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # JSON "resep" pemrosesan: model, pengaturan, kosakata, versi kode, durasi tiap langkah
+    processing_info: Mapped[str | None] = mapped_column(Text)
 
     speakers: Mapped[list["Speaker"]] = relationship(
         back_populates="meeting", cascade="all, delete-orphan", order_by="Speaker.label"

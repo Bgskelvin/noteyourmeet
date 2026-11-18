@@ -99,3 +99,21 @@ def test_raw_transcription_saved_for_later_reanalysis():
             folder = (get_settings().storage_dir / db.get(Meeting, mid).audio_path).parent
         raw = json.loads((folder / "transcription.json").read_text(encoding="utf-8"))
         assert raw["language"] and len(raw["segments"]) == 5 and "words" in raw["segments"][0]
+
+
+def test_processing_info_recorded():
+    with TestClient(app) as c:
+        c.post("/glossary", json={"term": "ResepTes"})
+        files = {"file": ("p.wav", _wav_bytes(1), "audio/wav")}
+        mid = c.post("/meetings", files=files, data={"language": "en"}).json()["id"]
+        with SessionLocal() as db:
+            while (got := claim_next(db)) not in (mid, None):
+                process_meeting(got)
+        process_meeting(mid)
+        info = c.get(f"/meetings/{mid}").json()["processing_info"]
+        assert info["provider"] == "fake" and info["language_requested"] == "en"
+        assert "ResepTes" in info["hotwords"]
+        assert set(info["timings_sec"]) == {"preprocess", "transcribe", "analyze"}
+        assert info["language_detected"] == "en" and "code_version" in info
+        for t in c.get("/glossary").json():
+            c.delete(f"/glossary/{t['id']}")

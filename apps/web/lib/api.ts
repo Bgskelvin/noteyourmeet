@@ -44,12 +44,30 @@ export interface Segment {
 export interface MeetingDetail extends MeetingSummary {
   language: string | null;
   requested_language: string | null;
+  processing_info: ProcessingInfo | null;
   min_speakers: number | null;
   max_speakers: number | null;
   processing_started_at: string | null;
   processing_finished_at: string | null;
   speakers: Speaker[];
   segments: Segment[];
+}
+
+export interface ProcessingInfo {
+  code_version?: string | null;
+  provider?: string;
+  whisper_model?: string;
+  compute_type?: string;
+  batch_size?: number;
+  device?: string;
+  language_requested?: string;
+  language_detected?: string;
+  align_model?: string;
+  hotwords?: string[];
+  min_speakers?: number | null;
+  max_speakers?: number | null;
+  speaker_rules?: { min_run_words: number; min_run_ms: number };
+  timings_sec?: { preprocess?: number; transcribe?: number; analyze?: number };
 }
 
 export interface GlossaryTerm {

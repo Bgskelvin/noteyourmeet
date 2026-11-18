@@ -1,4 +1,3 @@
-import logging
 import re
 import shutil
 import uuid
@@ -14,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.config import get_settings
 from app.db import get_db, init_db
 from app.languages import WHISPER_LANGUAGES
+from app.logging_setup import setup_logging
 from app.models import (
     PROCESSING_STATUSES,
     GlossaryTerm,
@@ -40,7 +40,7 @@ from app.schemas import (
 from app.services.corrections import build_pattern, normalize_term, replace_in_text
 from app.services.speakers import CleanSegment, compute_stats
 
-logging.basicConfig(level=logging.INFO)
+setup_logging("api")
 settings = get_settings()
 
 ALLOWED_EXT = {
