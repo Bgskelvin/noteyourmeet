@@ -75,6 +75,18 @@ export function MeetingView() {
           </p>
         </div>
         <StatusBadge status={m.status} />
+        {m.status === "DONE" && m.segments.length > 0 && (
+          <Link
+            href={`/meetings/${m.id}/periksa`}
+            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+            title="Dengarkan kalimat per kalimat, perbaiki kata, beri nama pembicara"
+          >
+            Periksa &amp; koreksi{" "}
+            <span className="opacity-80">
+              ({Math.round((m.segments.filter((s) => s.reviewed_at).length / m.segments.length) * 100)}%)
+            </span>
+          </Link>
+        )}
         {busy && (
           <CancelControl
             m={m}
@@ -520,8 +532,9 @@ function SegmentRow({
 
   return (
     <li id={`seg-${seg.id}`} className={`group flex gap-3 rounded-lg px-3 py-2 ${active ? c.soft : "hover:bg-neutral-50 dark:hover:bg-neutral-900/60"}`}>
-      <button onClick={onSeek} className="w-14 shrink-0 pt-0.5 text-left font-mono text-xs text-neutral-500 hover:text-blue-600" title="Putar dari sini">
+      <button onClick={onSeek} className="w-14 shrink-0 pt-0.5 text-left font-mono text-xs text-neutral-500 hover:text-blue-600" title={seg.reviewed_at ? "Sudah diperiksa · putar dari sini" : "Putar dari sini"}>
         {clock(seg.start_ms)}
+        {seg.reviewed_at && <span className="ml-0.5 text-emerald-500">✓</span>}
       </button>
       <div className="min-w-0 flex-1">
         {picking ? (

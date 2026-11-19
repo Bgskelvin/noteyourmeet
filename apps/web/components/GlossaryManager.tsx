@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { api, type CorrectionRule, type GlossaryTerm, type Suggestions } from "@/lib/api";
+import { api, type CorrectionRule, type GlossaryTerm, type ReviewStats, type Suggestions } from "@/lib/api";
 
 const card = "space-y-3 rounded-2xl border border-neutral-200 p-5 dark:border-neutral-800";
 const input = "min-w-0 flex-1 rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700";
@@ -12,6 +13,7 @@ export function GlossaryManager() {
   const [terms, setTerms] = useState<GlossaryTerm[] | null>(null);
   const [rules, setRules] = useState<CorrectionRule[] | null>(null);
   const [sug, setSug] = useState<Suggestions | null>(null);
+  const [review, setReview] = useState<ReviewStats | null>(null);
   const [termInput, setTermInput] = useState("");
   const [find, setFind] = useState("");
   const [replace, setReplace] = useState("");
@@ -20,10 +22,16 @@ export function GlossaryManager() {
 
   const load = useCallback(async () => {
     try {
-      const [t, r, s] = await Promise.all([api.listGlossary(), api.listCorrections(), api.suggestions()]);
+      const [t, r, s, rv] = await Promise.all([
+        api.listGlossary(),
+        api.listCorrections(),
+        api.suggestions(),
+        api.reviewStats(),
+      ]);
       setTerms(t);
       setRules(r);
       setSug(s);
+      setReview(rv);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -61,6 +69,62 @@ export function GlossaryManager() {
       </div>
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{error}</p>}
+
+      {/* ---------- Periksa transkrip ---------- */}
+      <section className={card}>
+        <div className="flex items-baseline justify-between gap-2">
+          <h2 className="font-semibold">Periksa transkrip</h2>
+          <span className="text-xs text-neutral-500">cara terbaik mengajari sistem</span>
+        </div>
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">
+          Dengarkan kalimat per kalimat, perbaiki kata yang salah atau terlewat, dan beri nama pembicara — semua di satu
+          layar. Setiap perbaikan kata bisa langsung diingat untuk meeting berikutnya.
+        </p>
+        {review && review.meetings.length === 0 && <p className="text-sm text-neutral-500">Belum ada meeting yang selesai diproses.</p>}
+        {!!review?.meetings.length && (
+          <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
+            {review.meetings.map((mt) => {
+              const pct = Math.round((mt.reviewed_segments / Math.max(1, mt.total_segments)) * 100);
+              return (
+                <li key={mt.id} className="flex items-center gap-3 py-2 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{mt.title}</p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <div className="h-1.5 w-32 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
+                        <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="text-xs text-neutral-500">
+                        {mt.reviewed_segments}/{mt.total_segments} kalimat ({pct}%)
+                      </span>
+                    </div>
+                  </div>
+                  <Link href={`/meetings/${mt.id}/periksa`} className={pct === 100 ? smallBtn : "rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700"}>
+                    {pct === 0 ? "Mulai periksa" : pct === 100 ? "Selesai ✓" : "Lanjutkan →"}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {review && (
+          <div className="rounded-lg bg-neutral-50 p-3 text-xs text-neutral-600 dark:bg-neutral-900 dark:text-neutral-400">
+            <div className="mb-1 flex justify-between">
+              <span>
+                <strong>Data latihan model:</strong> {review.training.usable_minutes} menit terperiksa dari target{" "}
+                {review.training.target_hours} jam
+              </span>
+              <span>{review.training.progress_pct}%</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
+              <div className="h-full bg-violet-500" style={{ width: `${Math.min(100, review.training.progress_pct)}%` }} />
+            </div>
+            <p className="mt-1.5">
+              Saat cukup, ekspor dengan <code className="rounded bg-neutral-200 px-1 dark:bg-neutral-800">python -m app.dataset export --dest …</code> untuk
+              melatih ulang Whisper dengan suara &amp; istilah tim sendiri.
+            </p>
+          </div>
+        )}
+      </section>
 
       {/* ---------- Saran ---------- */}
       <section className={card}>

@@ -35,10 +35,31 @@ class SegmentOut(BaseModel):
     text: str
     original_text: str | None = None  # terisi = kalimat ini sudah diedit (manual atau otomatis)
     auto_corrected: bool | None = None  # True = diubah otomatis oleh memori koreksi
+    reviewed_at: UtcDatetime | None = None  # terisi = sudah diperiksa user
 
 
 class SegmentUpdate(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
+
+
+class ReviewIn(BaseModel):
+    reviewed: bool = True
+
+
+class MeetingReviewStat(BaseModel):
+    id: int
+    title: str
+    duration_sec: float | None
+    total_segments: int
+    reviewed_segments: int
+    reviewed_ms: int
+
+
+class ReviewStats(BaseModel):
+    meetings: list[MeetingReviewStat]
+    reviewed_ms_total: int
+    reviewed_segments_total: int
+    training: dict  # ringkasan dataset latihan: usable_minutes, target_hours, progress_pct, ...
 
 
 class ReplaceRequest(BaseModel):

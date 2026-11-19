@@ -7,10 +7,11 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from sqlalchemy import func, select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
+from app.dataset import stats as dataset_stats
 from app.db import get_db, init_db
 from app.languages import WHISPER_LANGUAGES
 from app.logging_setup import setup_logging
@@ -33,12 +34,16 @@ from app.schemas import (
     GlossaryTermIn,
     GlossaryTermOut,
     MeetingDetail,
+    MeetingReviewStat,
     MeetingSummary,
     MeetingUpdate,
     ReplaceRequest,
     ReplaceResult,
     RetryRequest,
+    ReviewIn,
+    ReviewStats,
     RuleSuggestion,
+    SegmentOut,
     SegmentUpdate,
     SpeakerMerge,
     SpeakerOut,
@@ -346,6 +351,7 @@ def edit_segment(segment_id: int, body: SegmentUpdate, db: Session = Depends(get
         seg.original_text = seg.text
     seg.text = new
     seg.auto_corrected = None  # sekarang diedit tangan
+    seg.reviewed_at = seg.reviewed_at or utcnow()  # diedit = sudah diperiksa
     if seg.original_text == new:  # dikembalikan ke teks asli
         seg.original_text = None
     m = _get_meeting(db, seg.meeting_id)
@@ -541,3 +547,47 @@ def dismiss_suggestion(body: DismissIn, db: Session = Depends(get_db)) -> None:
     if exists is None:
         db.add(DismissedSuggestion(kind=body.kind, value=value))
         db.commit()
+
+
+# ---------- Pemeriksaan transkrip (bahan set uji & data latihan) ----------
+
+@app.post("/segments/{segment_id}/review", response_model=SegmentOut)
+def review_segment(segment_id: int, body: ReviewIn, db: Session = Depends(get_db)) -> TranscriptSegment:
+    """Tandai kalimat sudah diperiksa (benar) atau batalkan tandanya."""
+    seg = db.get(TranscriptSegment, segment_id)
+    if seg is None:
+        raise HTTPException(404, "Kalimat tidak ditemukan")
+    seg.reviewed_at = (seg.reviewed_at or utcnow()) if body.reviewed else None
+    db.commit()
+    return seg
+
+
+@app.get("/review/stats", response_model=ReviewStats)
+def review_stats(db: Session = Depends(get_db)) -> ReviewStats:
+    rows = db.execute(
+        select(
+            Meeting.id, Meeting.title, Meeting.duration_sec,
+            func.count(TranscriptSegment.id),
+            func.count(TranscriptSegment.reviewed_at),
+            func.coalesce(
+                func.sum(
+                    case((TranscriptSegment.reviewed_at.is_not(None),
+                          TranscriptSegment.end_ms - TranscriptSegment.start_ms), else_=0)
+                ), 0,
+            ),
+        )
+        .join(TranscriptSegment, TranscriptSegment.meeting_id == Meeting.id)
+        .where(Meeting.status == MeetingStatus.DONE)
+        .group_by(Meeting.id)
+        .order_by(Meeting.created_at.desc())
+    ).all()
+    stats = [
+        MeetingReviewStat(id=i, title=t, duration_sec=d, total_segments=n, reviewed_segments=r, reviewed_ms=ms)
+        for i, t, d, n, r, ms in rows
+    ]
+    return ReviewStats(
+        meetings=stats,
+        reviewed_ms_total=sum(s.reviewed_ms for s in stats),
+        reviewed_segments_total=sum(s.reviewed_segments for s in stats),
+        training=dataset_stats(),
+    )

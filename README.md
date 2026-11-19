@@ -51,6 +51,25 @@ Pertama kali memproses, worker mengunduh model (±3 GB total) ke cache Hugging F
 - **Kosakata tim** (menu *Kosakata & koreksi*): daftar nama orang, singkatan, istilah. Whisper memprioritaskan ejaan ini
   untuk meeting yang diproses berikutnya — mencegah kesalahan yang sama terulang.
 
+### Periksa & koreksi (cara termudah mengajari sistem)
+Di halaman meeting klik **Periksa & koreksi**, atau buka **Kosakata & koreksi → Periksa transkrip**.
+Satu kalimat tampil sekali, audionya langsung diputar:
+- **Kata salah?** Blok/seleksi kata itu → isi kata yang benar → *Terapkan* (bisa sekaligus diganti di seluruh meeting,
+  diingat untuk meeting berikutnya, dan masuk Kosakata tim).
+- **Kata terlewat?** Ketik langsung di kotak teks.
+- **Siapa yang bicara?** Isi nama di kotak *Siapa yang bicara ini?* (berlaku untuk semua kalimat orang itu),
+  atau *Bukan dia? Pindahkan ke…* untuk satu kalimat.
+- **Enter** = benar/simpan & lanjut · Shift+Enter = baris baru · Esc = batalkan · Alt+P = putar ulang · Alt+←/→ = pindah.
+- Kalimat yang disetujui ditandai **✓ sudah diperiksa** — hanya kalimat ini yang dipakai untuk set uji & data latihan.
+
+### Data latihan (untuk melatih ulang Whisper kelak)
+```powershell
+cd appsapi
+.venvScriptspython -m app.dataset stats                        # berapa menit sudah terperiksa (target ±10 jam)
+.venvScriptspython -m app.dataset export --dest "D:dataset-nym"
+```
+Hasil: `audio/*.wav` + `metadata.jsonl` (format audiofolder Hugging Face), hanya dari kalimat bertanda ✓.
+
 ### Sistem belajar dari koreksimu
 - **Memori koreksi:** saat *Ganti kata* dengan opsi **Ingat koreksi ini** (default aktif), pasangan "salah → benar"
   disimpan dan **otomatis diterapkan** ke setiap transkrip baru (kalimatnya bertanda *otomatis*, teks asli tetap tersimpan).

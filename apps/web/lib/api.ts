@@ -41,6 +41,8 @@ export interface Segment {
   original_text: string | null;
   /** True = diubah otomatis oleh memori koreksi. */
   auto_corrected: boolean | null;
+  /** Terisi = sudah diperiksa user (benar / sudah dikoreksi). */
+  reviewed_at: string | null;
 }
 
 export interface MeetingDetail extends MeetingSummary {
@@ -85,6 +87,20 @@ export interface CorrectionRule {
 export interface Suggestions {
   terms: { term: string; count: number; example: string }[];
   rules: { find: string; replace: string; count: number; example: string }[];
+}
+
+export interface ReviewStats {
+  meetings: {
+    id: number;
+    title: string;
+    duration_sec: number | null;
+    total_segments: number;
+    reviewed_segments: number;
+    reviewed_ms: number;
+  }[];
+  reviewed_ms_total: number;
+  reviewed_segments_total: number;
+  training: { usable_segments: number; usable_minutes: number; target_hours: number; progress_pct: number };
 }
 
 export interface GlossaryTerm {
@@ -175,6 +191,9 @@ export const api = {
       method: "POST",
     }),
   suggestions: () => request<Suggestions>("/suggestions"),
+  reviewSegment: (segmentId: number, reviewed = true) =>
+    request<Segment>(`/segments/${segmentId}/review`, { method: "POST", body: JSON.stringify({ reviewed }) }),
+  reviewStats: () => request<ReviewStats>("/review/stats"),
   dismissSuggestion: (kind: "term" | "rule", value: string) =>
     request<void>("/suggestions/dismiss", { method: "POST", body: JSON.stringify({ kind, value }) }),
   audioUrl: (id: number) => `${API_URL}/meetings/${id}/audio`,

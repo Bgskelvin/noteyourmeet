@@ -98,6 +98,8 @@ class TranscriptSegment(Base):
     original_text: Mapped[str | None] = mapped_column(Text)
     # True = diubah otomatis oleh "memori koreksi" (bukan diedit tangan)
     auto_corrected: Mapped[bool | None] = mapped_column(Boolean)
+    # Diisi saat user menyatakan kalimat ini sudah diperiksa & benar (atau mengeditnya)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     confidence: Mapped[float | None] = mapped_column(Float)
 
     meeting: Mapped[Meeting] = relationship(back_populates="segments")
