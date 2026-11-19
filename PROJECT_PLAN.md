@@ -361,7 +361,9 @@ Catatan teknis Claude API (per Nov 2026):
 - [x] Worker menyimpan `transcription.json` (kata + speaker mentah) per meeting → kelak bisa "rapikan ulang pembicara" tanpa GPU
 - [x] Fondasi pengembangan: log ke file (`data/logs`), backup (`python -m app.backup`), resep pemrosesan per meeting (`processing_info` + "Detail proses" di UI), set uji kualitas (`python -m app.evaluate`: WER & salah pembicara, `--cached` tanpa GPU)
 - [x] Push repo ke GitHub (private) `Bgskelvin/noteyourmeet`, branch `main`; riwayat dicek bersih dari .env/token/data
+- [x] Sistem belajar dari koreksi: **memori koreksi** (`correction_rules`; "Ganti kata" + opsi Ingat → diterapkan otomatis di pipeline, tanda *otomatis*, endpoint `apply-corrections` untuk meeting lama) + **saran** dari editan manual (`/suggestions`: istilah baru → kosakata, pasangan salah→benar ≤3 kata → aturan; bisa diabaikan). Halaman jadi "Kosakata & koreksi"
 - [ ] User membuat set uji: 2–3 potongan ±5 menit yang sudah dikoreksi, lalu `evaluate run --note baseline`
+- [ ] Fase 3: kenali suara anggota tim (voice enrollment dari pembicara yang sudah dinamai); jangka panjang: fine-tune Whisper bila ≥10 jam koreksi terkumpul (perlu GPU cloud)
 - [ ] Auth invite-only (wajib sebelum online)
 
 **Fase 2 — Notulen (± 1 minggu)**
@@ -434,6 +436,7 @@ Fitur Fase 1 lengkap: upload + bahasa per meeting, progres real-time, **batalkan
 | 2026-11-18 | Pembatalan kooperatif (flag di DB + titik cek di callback progres), `Cancelled` turunan `BaseException` | Tanpa membunuh proses worker; tidak tertelan `except Exception` di library; VRAM bisa dilepas rapi |
 | 2026-11-18 | Pembagian pembicara: per kalimat Whisper, bukan per kata mentah | Diarization meleset ±0,5 dtk di batas giliran → kata pertama/terakhir sering ikut orang sebelumnya. Dibuktikan pada rekaman user |
 | 2026-11-18 | Kualitas diukur dengan set uji (WER + salah pembicara berbasis waktu, pemetaan label via overlap) dari potongan meeting asli yang dikoreksi user | Perubahan model/kosakata/aturan dinilai dengan angka. Uji GPU: potongan 1 menit diproses sendiri hanya terdeteksi 2 dari 5 pembicara → potongan uji harus ±5 menit &/atau isi min/maks peserta |
+| 2026-11-19 | "Belajar" = memori koreksi + saran yang DISETUJUI user, bukan otomatis penuh; model Whisper/pyannote tidak dilatih ulang | Model pretrained tidak belajar dari pemakaian. Pasangan dari editan bisa berbahaya bila diterapkan buta (mis. "Tuh→Dua", kata umum) → selalu lewat persetujuan. Fine-tuning butuh ≥10 jam data terkoreksi & GPU lebih besar |
 | 2026-11-18 | Migrasi skema sederhana `_add_missing_columns()` (tambah kolom nullable) alih-alih Alembic | Cukup untuk SQLite & perubahan kecil; pindah ke Alembic saat ke Postgres |
 | 2026-11-18 | LLM notulen: `claude-opus-5-5`, tugas ringan `claude-haiku-5-5` | Kualitas + konteks 1M |
 | 2026-11-18 | Kosakata tim global dipakai sebagai `hotwords` (bukan `initial_prompt`); model tetap `large-v3-turbo` | Uji 3 menit rekaman Indonesia user: hotwords membetulkan "CSILC"→"CS ALC" tanpa halusinasi, tapi tanda baca berkurang; initial_prompt → tanda baca rapi tapi 30 dtk pertama jadi halusinasi "Terima kasih ×3" (isi hilang). large-v3: "2 menit" benar tapi istilah Inggris lebih buruk ("kanva", "disep") & ±1,5× lebih lambat. Nanti juga dipakai di prompt notulen Claude |

@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
@@ -16,6 +16,8 @@ from app.languages import WHISPER_LANGUAGES
 from app.logging_setup import setup_logging
 from app.models import (
     PROCESSING_STATUSES,
+    CorrectionRule,
+    DismissedSuggestion,
     GlossaryTerm,
     Meeting,
     MeetingStatus,
@@ -24,6 +26,10 @@ from app.models import (
     utcnow,
 )
 from app.schemas import (
+    CorrectionRuleIn,
+    CorrectionRuleOut,
+    CorrectionRuleUpdate,
+    DismissIn,
     GlossaryTermIn,
     GlossaryTermOut,
     MeetingDetail,
@@ -32,12 +38,22 @@ from app.schemas import (
     ReplaceRequest,
     ReplaceResult,
     RetryRequest,
+    RuleSuggestion,
     SegmentUpdate,
     SpeakerMerge,
     SpeakerOut,
     SpeakerUpdate,
+    Suggestions,
+    TermSuggestion,
 )
-from app.services.corrections import build_pattern, normalize_term, replace_in_text
+from app.services.corrections import (
+    apply_rules,
+    build_pattern,
+    edit_pairs,
+    new_terms,
+    normalize_term,
+    replace_in_text,
+)
 from app.services.speakers import CleanSegment, compute_stats
 
 setup_logging("api")
@@ -329,6 +345,7 @@ def edit_segment(segment_id: int, body: SegmentUpdate, db: Session = Depends(get
     if seg.original_text is None and new != seg.text:
         seg.original_text = seg.text
     seg.text = new
+    seg.auto_corrected = None  # sekarang diedit tangan
     if seg.original_text == new:  # dikembalikan ke teks asli
         seg.original_text = None
     m = _get_meeting(db, seg.meeting_id)
@@ -360,12 +377,16 @@ def replace_text(meeting_id: int, body: ReplaceRequest, db: Session = Depends(ge
         if seg.original_text is None:
             seg.original_text = seg.text
         seg.text = new
+        seg.auto_corrected = None
         if seg.original_text == new:
             seg.original_text = None
         changed += 1
-    if not body.dry_run and changed:
-        db.flush()
-        _recompute_stats(db, m)
+    if not body.dry_run and body.remember and replacement and matches:
+        _upsert_rule(db, body.find.strip(), replacement, whole_word=body.whole_word, match_case=body.match_case)
+    if not body.dry_run:
+        if changed:
+            db.flush()
+            _recompute_stats(db, m)
         db.commit()
     return ReplaceResult(matches=matches, segments_changed=changed)
 
@@ -395,4 +416,128 @@ def delete_glossary(term_id: int, db: Session = Depends(get_db)) -> None:
     t = db.get(GlossaryTerm, term_id)
     if t is not None:
         db.delete(t)
+        db.commit()
+
+
+# ---------- Memori koreksi (salah → benar, diterapkan otomatis) ----------
+
+def _upsert_rule(
+    db: Session, find: str, replace: str, *, whole_word: bool = True, match_case: bool = False
+) -> CorrectionRule:
+    find = normalize_term(find)
+    rule = db.scalar(select(CorrectionRule).where(func.lower(CorrectionRule.find) == find.lower()))
+    if rule is None:
+        rule = CorrectionRule(find=find, replace=normalize_term(replace), whole_word=whole_word, match_case=match_case)
+        db.add(rule)
+    else:
+        rule.replace, rule.whole_word, rule.match_case = normalize_term(replace), whole_word, match_case
+        rule.enabled = True
+    db.flush()
+    return rule
+
+
+@app.get("/corrections", response_model=list[CorrectionRuleOut])
+def list_corrections(db: Session = Depends(get_db)) -> list[CorrectionRule]:
+    return list(db.scalars(select(CorrectionRule).order_by(CorrectionRule.find)))
+
+
+@app.post("/corrections", response_model=CorrectionRuleOut, status_code=201)
+def add_correction(body: CorrectionRuleIn, db: Session = Depends(get_db)) -> CorrectionRule:
+    if normalize_term(body.find).lower() == normalize_term(body.replace).lower() and not body.match_case:
+        raise HTTPException(422, "Kata salah dan kata benar sama")
+    rule = _upsert_rule(db, body.find, body.replace, whole_word=body.whole_word, match_case=body.match_case)
+    db.commit()
+    return rule
+
+
+@app.patch("/corrections/{rule_id}", response_model=CorrectionRuleOut)
+def update_correction(rule_id: int, body: CorrectionRuleUpdate, db: Session = Depends(get_db)) -> CorrectionRule:
+    rule = db.get(CorrectionRule, rule_id)
+    if rule is None:
+        raise HTTPException(404, "Aturan tidak ditemukan")
+    rule.enabled = body.enabled
+    db.commit()
+    return rule
+
+
+@app.delete("/corrections/{rule_id}", status_code=204)
+def delete_correction(rule_id: int, db: Session = Depends(get_db)) -> None:
+    if (rule := db.get(CorrectionRule, rule_id)) is not None:
+        db.delete(rule)
+        db.commit()
+
+
+@app.post("/meetings/{meeting_id}/apply-corrections", response_model=ReplaceResult)
+def apply_corrections(meeting_id: int, db: Session = Depends(get_db)) -> ReplaceResult:
+    """Terapkan semua memori koreksi aktif ke meeting yang sudah ada (tanpa proses ulang GPU)."""
+    m = _get_meeting(db, meeting_id)
+    rules = list(db.scalars(select(CorrectionRule).where(CorrectionRule.enabled).order_by(CorrectionRule.id)))
+    matches = changed = 0
+    totals = [0] * len(rules)
+    for seg in db.scalars(select(TranscriptSegment).where(TranscriptSegment.meeting_id == m.id)):
+        new, counts = apply_rules(seg.text, rules)
+        matches += sum(counts)
+        if new == seg.text or not new:
+            continue
+        totals = [a + b for a, b in zip(totals, counts, strict=True)]
+        if seg.original_text is None:
+            seg.original_text = seg.text
+            seg.auto_corrected = True
+        seg.text = new
+        changed += 1
+    for r, n in zip(rules, totals, strict=True):
+        r.times_applied += n
+    if changed:
+        db.flush()
+        _recompute_stats(db, m)
+    db.commit()
+    return ReplaceResult(matches=matches, segments_changed=changed)
+
+
+# ---------- Saran dari editan user ----------
+
+MAX_SUGGESTIONS = 30
+
+
+@app.get("/suggestions", response_model=Suggestions)
+def suggestions(db: Session = Depends(get_db)) -> Suggestions:
+    """Pelajari editan manual: istilah baru → saran Kosakata tim; 'salah → benar' → saran memori koreksi."""
+    glossary = {t.lower() for t in db.scalars(select(GlossaryTerm.term))}
+    rule_finds = {f.lower() for f in db.scalars(select(CorrectionRule.find))}
+    dismissed = {(d.kind, d.value.lower()) for d in db.scalars(select(DismissedSuggestion))}
+    terms: dict[str, list] = {}
+    pairs: dict[tuple[str, str], list] = {}
+    edited = db.scalars(
+        select(TranscriptSegment)
+        .where(TranscriptSegment.original_text.is_not(None), TranscriptSegment.auto_corrected.is_not(True))
+        .order_by(TranscriptSegment.id.desc())
+        .limit(5000)
+    )
+    for seg in edited:
+        for term in new_terms(seg.original_text, seg.text):
+            if term.lower() in glossary or ("term", term.lower()) in dismissed:
+                continue
+            terms.setdefault(term.lower(), [term, 0, seg.text])[1] += 1
+        for old, new in edit_pairs(seg.original_text, seg.text):
+            if old.lower() in rule_finds or ("rule", f"{old}→{new}".lower()) in dismissed:
+                continue
+            pairs.setdefault((old.lower(), new.lower()), [old, new, 0, seg.text])[2] += 1
+    return Suggestions(
+        terms=[TermSuggestion(term=t, count=n, example=ex) for t, n, ex in
+               sorted(terms.values(), key=lambda v: -v[1])[:MAX_SUGGESTIONS]],
+        rules=[RuleSuggestion(find=o, replace=r, count=n, example=ex) for o, r, n, ex in
+               sorted(pairs.values(), key=lambda v: -v[2])[:MAX_SUGGESTIONS]],
+    )
+
+
+@app.post("/suggestions/dismiss", status_code=204)
+def dismiss_suggestion(body: DismissIn, db: Session = Depends(get_db)) -> None:
+    value = body.value.strip()
+    exists = db.scalar(
+        select(DismissedSuggestion).where(
+            DismissedSuggestion.kind == body.kind, func.lower(DismissedSuggestion.value) == value.lower()
+        )
+    )
+    if exists is None:
+        db.add(DismissedSuggestion(kind=body.kind, value=value))
         db.commit()

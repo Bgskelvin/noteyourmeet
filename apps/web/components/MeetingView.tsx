@@ -320,6 +320,7 @@ function TranscriptWorkspace({ m, setM, run }: { m: MeetingDetail; setM: (m: Mee
   const [replaceWith, setReplaceWith] = useState("");
   const [wholeWord, setWholeWord] = useState(true);
   const [addToGlossary, setAddToGlossary] = useState(true);
+  const [remember, setRemember] = useState(true);
   const [replacing, setReplacing] = useState(false);
 
   const q = query.trim().toLowerCase();
@@ -341,10 +342,24 @@ function TranscriptWorkspace({ m, setM, run }: { m: MeetingDetail; setM: (m: Mee
     if (!confirm(`Ganti ${matchCount} kemunculan "${find}" menjadi "${repl || "(kosong)"}"?`)) return;
     setReplacing(true);
     await run(async () => {
-      await api.replaceText(m.id, { find, replace: repl, whole_word: wholeWord });
+      await api.replaceText(m.id, { find, replace: repl, whole_word: wholeWord, remember: remember && !!repl });
       if (addToGlossary && repl) await api.addGlossary(repl);
       setM(await api.getMeeting(m.id));
       setQuery(repl);
+    });
+    setReplacing(false);
+  }
+
+  async function applyMemory() {
+    setReplacing(true);
+    await run(async () => {
+      const r = await api.applyCorrections(m.id);
+      setM(await api.getMeeting(m.id));
+      alert(
+        r.segments_changed
+          ? `${r.segments_changed} kalimat diperbaiki otomatis dari memori koreksi.`
+          : "Tidak ada yang perlu diperbaiki — semua kata di memori koreksi sudah benar di transkrip ini.",
+      );
     });
     setReplacing(false);
   }
@@ -427,6 +442,23 @@ function TranscriptWorkspace({ m, setM, run }: { m: MeetingDetail; setM: (m: Mee
                   <input type="checkbox" checked={addToGlossary} onChange={(e) => setAddToGlossary(e.target.checked)} /> Tambahkan kata
                   yang benar ke Kosakata tim
                 </label>
+                <label className="flex items-center gap-1.5" title="Koreksi yang sama otomatis diterapkan ke transkrip meeting berikutnya">
+                  <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Ingat koreksi ini
+                  untuk meeting berikutnya
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-neutral-200 pt-2 text-xs text-neutral-500 dark:border-neutral-800">
+                <span>
+                  Koreksi yang sudah diingat bisa dikelola di <Link href="/kosakata" className="underline">Kosakata &amp; koreksi</Link>.
+                </span>
+                <button
+                  className="rounded-lg border border-neutral-300 px-2.5 py-1 hover:bg-neutral-100 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                  disabled={replacing}
+                  onClick={applyMemory}
+                  title="Terapkan semua koreksi yang pernah diingat ke transkrip ini (tanpa proses ulang)"
+                >
+                  Terapkan memori koreksi
+                </button>
               </div>
             </div>
           )}
@@ -550,8 +582,13 @@ function SegmentRow({
             <p className="flex-1 cursor-pointer leading-relaxed" onClick={onSeek}>
               {seg.text}
               {seg.original_text && (
-                <span className="ml-1.5 align-middle text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400" title={`Teks asli: ${seg.original_text}`}>
-                  diedit
+                <span
+                  className={`ml-1.5 align-middle text-[10px] font-medium uppercase tracking-wide ${
+                    seg.auto_corrected ? "text-sky-600 dark:text-sky-400" : "text-amber-600 dark:text-amber-400"
+                  }`}
+                  title={`${seg.auto_corrected ? "Dikoreksi otomatis dari memori koreksi. " : ""}Teks asli: ${seg.original_text}`}
+                >
+                  {seg.auto_corrected ? "otomatis" : "diedit"}
                 </span>
               )}
             </p>

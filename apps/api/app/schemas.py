@@ -33,7 +33,8 @@ class SegmentOut(BaseModel):
     start_ms: int
     end_ms: int
     text: str
-    original_text: str | None = None  # terisi = kalimat ini sudah diedit manual
+    original_text: str | None = None  # terisi = kalimat ini sudah diedit (manual atau otomatis)
+    auto_corrected: bool | None = None  # True = diubah otomatis oleh memori koreksi
 
 
 class SegmentUpdate(BaseModel):
@@ -46,6 +47,7 @@ class ReplaceRequest(BaseModel):
     match_case: bool = False
     whole_word: bool = True
     dry_run: bool = False  # true = hanya hitung, tidak mengubah
+    remember: bool = False  # true = simpan sebagai memori koreksi untuk meeting berikutnya
 
 
 class ReplaceResult(BaseModel):
@@ -106,3 +108,49 @@ class SpeakerUpdate(BaseModel):
 class SpeakerMerge(BaseModel):
     source_ids: list[int] = Field(min_length=1)
     target_id: int
+
+
+class CorrectionRuleIn(BaseModel):
+    find: str = Field(min_length=1, max_length=200)
+    replace: str = Field(min_length=1, max_length=200)
+    whole_word: bool = True
+    match_case: bool = False
+
+
+class CorrectionRuleUpdate(BaseModel):
+    enabled: bool
+
+
+class CorrectionRuleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    find: str
+    replace: str
+    whole_word: bool
+    match_case: bool
+    enabled: bool
+    times_applied: int
+
+
+class TermSuggestion(BaseModel):
+    term: str
+    count: int  # berapa kali muncul di editan
+    example: str  # contoh kalimat setelah diedit
+
+
+class RuleSuggestion(BaseModel):
+    find: str
+    replace: str
+    count: int
+    example: str
+
+
+class Suggestions(BaseModel):
+    terms: list[TermSuggestion]
+    rules: list[RuleSuggestion]
+
+
+class DismissIn(BaseModel):
+    kind: str = Field(pattern="^(term|rule)$")
+    value: str = Field(min_length=1, max_length=420)  # rule: "salah→benar"

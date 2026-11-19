@@ -39,6 +39,8 @@ export interface Segment {
   text: string;
   /** Terisi bila kalimat sudah diedit manual (berisi teks asli dari AI). */
   original_text: string | null;
+  /** True = diubah otomatis oleh memori koreksi. */
+  auto_corrected: boolean | null;
 }
 
 export interface MeetingDetail extends MeetingSummary {
@@ -70,6 +72,21 @@ export interface ProcessingInfo {
   timings_sec?: { preprocess?: number; transcribe?: number; analyze?: number };
 }
 
+export interface CorrectionRule {
+  id: number;
+  find: string;
+  replace: string;
+  whole_word: boolean;
+  match_case: boolean;
+  enabled: boolean;
+  times_applied: number;
+}
+
+export interface Suggestions {
+  terms: { term: string; count: number; example: string }[];
+  rules: { find: string; replace: string; count: number; example: string }[];
+}
+
 export interface GlossaryTerm {
   id: number;
   term: string;
@@ -81,6 +98,8 @@ export interface ReplaceRequest {
   match_case?: boolean;
   whole_word?: boolean;
   dry_run?: boolean;
+  /** Simpan sebagai memori koreksi untuk meeting berikutnya. */
+  remember?: boolean;
 }
 
 export const isProcessing = (s: MeetingStatus) => s !== "DONE" && s !== "FAILED" && s !== "CANCELLED";
@@ -145,6 +164,19 @@ export const api = {
   addGlossary: (term: string) =>
     request<GlossaryTerm[]>("/glossary", { method: "POST", body: JSON.stringify({ term }) }),
   deleteGlossary: (id: number) => request<void>(`/glossary/${id}`, { method: "DELETE" }),
+  listCorrections: () => request<CorrectionRule[]>("/corrections"),
+  addCorrection: (find: string, replace: string) =>
+    request<CorrectionRule>("/corrections", { method: "POST", body: JSON.stringify({ find, replace }) }),
+  setCorrectionEnabled: (id: number, enabled: boolean) =>
+    request<CorrectionRule>(`/corrections/${id}`, { method: "PATCH", body: JSON.stringify({ enabled }) }),
+  deleteCorrection: (id: number) => request<void>(`/corrections/${id}`, { method: "DELETE" }),
+  applyCorrections: (meetingId: number) =>
+    request<{ matches: number; segments_changed: number }>(`/meetings/${meetingId}/apply-corrections`, {
+      method: "POST",
+    }),
+  suggestions: () => request<Suggestions>("/suggestions"),
+  dismissSuggestion: (kind: "term" | "rule", value: string) =>
+    request<void>("/suggestions/dismiss", { method: "POST", body: JSON.stringify({ kind, value }) }),
   audioUrl: (id: number) => `${API_URL}/meetings/${id}/audio`,
 };
 

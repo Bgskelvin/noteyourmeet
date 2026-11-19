@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.models import (
     PROCESSING_STATUSES,
+    CorrectionRule,
     GlossaryTerm,
     Meeting,
     MeetingStatus,
@@ -24,7 +25,8 @@ from app.models import (
     utcnow,
 )
 from app.services import audio
-from app.services.speakers import MIN_RUN_MS, MIN_RUN_WORDS, process_segments
+from app.services.corrections import apply_rules
+from app.services.speakers import MIN_RUN_MS, MIN_RUN_WORDS, compute_stats, process_segments
 from app.services.transcription import TranscriptionProvider, get_provider
 from app.version import code_version
 
@@ -163,7 +165,22 @@ def process_meeting(meeting_id: int, provider: TranscriptionProvider | None = No
 
             # 3) Rapikan per pembicara + statistik
             _set(db, m, MeetingStatus.ANALYZING, "Menghitung statistik pembicara")
-            segs, stats = process_segments(result.segments)
+            segs, _ = process_segments(result.segments)
+            # Memori koreksi: terapkan 'salah → benar' yang pernah user simpan
+            rules = list(db.scalars(select(CorrectionRule).where(CorrectionRule.enabled).order_by(CorrectionRule.id)))
+            auto_fixed: dict[int, str] = {}  # index segmen → teks asli Whisper
+            if rules:
+                totals = [0] * len(rules)
+                for idx, sg in enumerate(segs):
+                    new, counts = apply_rules(sg.text, rules)
+                    if new != sg.text and new:
+                        auto_fixed[idx] = sg.text
+                        sg.text = new
+                        totals = [a + b for a, b in zip(totals, counts, strict=True)]
+                for r, n in zip(rules, totals, strict=True):
+                    r.times_applied += n
+            info["auto_corrections"] = len(auto_fixed)
+            stats = compute_stats(segs)
             db.execute(delete(TranscriptSegment).where(TranscriptSegment.meeting_id == m.id))
             db.execute(delete(Speaker).where(Speaker.meeting_id == m.id))
             speakers = {
@@ -179,8 +196,9 @@ def process_meeting(meeting_id: int, provider: TranscriptionProvider | None = No
                 TranscriptSegment(
                     meeting_id=m.id, speaker_id=speakers[sg.speaker].id,
                     start_ms=sg.start_ms, end_ms=sg.end_ms, text=sg.text, confidence=sg.confidence,
+                    original_text=auto_fixed.get(i), auto_corrected=True if i in auto_fixed else None,
                 )
-                for sg in segs
+                for i, sg in enumerate(segs)
             )
             m.language = result.language
             m.speaker_count = len(speakers)

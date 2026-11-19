@@ -1,7 +1,7 @@
 import enum
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -96,6 +96,8 @@ class TranscriptSegment(Base):
     text: Mapped[str] = mapped_column(Text)
     # Teks asli hasil AI, diisi saat pertama kali diedit manual (agar bisa dikembalikan)
     original_text: Mapped[str | None] = mapped_column(Text)
+    # True = diubah otomatis oleh "memori koreksi" (bukan diedit tangan)
+    auto_corrected: Mapped[bool | None] = mapped_column(Boolean)
     confidence: Mapped[float | None] = mapped_column(Float)
 
     meeting: Mapped[Meeting] = relationship(back_populates="segments")
@@ -109,3 +111,29 @@ class GlossaryTerm(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     term: Mapped[str] = mapped_column(String(100), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CorrectionRule(Base):
+    """Memori koreksi: 'kata salah → kata benar' yang diterapkan otomatis ke transkrip baru."""
+
+    __tablename__ = "correction_rules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    find: Mapped[str] = mapped_column(String(200), unique=True)
+    replace: Mapped[str] = mapped_column(String(200))
+    whole_word: Mapped[bool] = mapped_column(Boolean, default=True)
+    match_case: Mapped[bool] = mapped_column(Boolean, default=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    times_applied: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DismissedSuggestion(Base):
+    """Saran yang sudah ditolak user ('term' untuk kosakata, 'rule' untuk 'salah→benar'), agar tidak muncul lagi."""
+
+    __tablename__ = "dismissed_suggestions"
+    __table_args__ = (UniqueConstraint("kind", "value"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(10))
+    value: Mapped[str] = mapped_column(String(420))

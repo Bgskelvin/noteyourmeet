@@ -48,8 +48,16 @@ Pertama kali memproses, worker mengunduh model (±3 GB total) ke cache Hugging F
 ### Memperbaiki kata yang salah
 - **Edit satu kalimat:** arahkan kursor ke kalimat → klik **✎ Edit** → Enter untuk simpan. Teks asli AI tetap tersimpan (tanda *diedit*, bisa *Kembalikan teks asli*).
 - **Ganti kata di seluruh transkrip:** klik **Ganti kata**, isi kata yang salah & yang benar → **Ganti semua**.
-- **Kosakata tim** (menu atas): daftar nama orang, singkatan, istilah. Whisper memprioritaskan ejaan ini
+- **Kosakata tim** (menu *Kosakata & koreksi*): daftar nama orang, singkatan, istilah. Whisper memprioritaskan ejaan ini
   untuk meeting yang diproses berikutnya — mencegah kesalahan yang sama terulang.
+
+### Sistem belajar dari koreksimu
+- **Memori koreksi:** saat *Ganti kata* dengan opsi **Ingat koreksi ini** (default aktif), pasangan "salah → benar"
+  disimpan dan **otomatis diterapkan** ke setiap transkrip baru (kalimatnya bertanda *otomatis*, teks asli tetap tersimpan).
+  Untuk meeting lama: *Ganti kata* → **Terapkan memori koreksi**. Kelola (aktif/nonaktif/hapus) di *Kosakata & koreksi*.
+- **Saran otomatis:** dari kalimat yang kamu edit, halaman *Kosakata & koreksi* menyarankan istilah baru untuk Kosakata tim
+  dan pola "salah → benar" untuk memori koreksi. Cek dulu sebelum menerima — kata umum (mis. "tuh") jangan diganti otomatis.
+- Jumlah koreksi otomatis per meeting tercatat di **Detail proses** (`auto_corrections`).
 
 ### Membatalkan proses
 Di halaman meeting yang sedang diproses, klik **Batalkan**. Worker berhenti di titik cek berikutnya
