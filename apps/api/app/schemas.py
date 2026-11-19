@@ -175,3 +175,33 @@ class Suggestions(BaseModel):
 class DismissIn(BaseModel):
     kind: str = Field(pattern="^(term|rule)$")
     value: str = Field(min_length=1, max_length=420)  # rule: "salah→benar"
+
+
+class LearnIn(BaseModel):
+    find: str = Field(min_length=1, max_length=200)
+    replace: str = Field(min_length=1, max_length=200)
+    meeting_id: int | None = None  # isi untuk langsung mengganti di meeting ini
+    apply_to_meeting: bool = True
+    whole_word: bool = True
+    confirm_common: bool = False  # user sudah setuju mengganti kata yang sangat umum
+
+
+class LearnOut(BaseModel):
+    rule_id: int
+    heard_by_whisper: bool  # kata benar ada di kosakata Whisper
+    glossary_added: bool  # baru saja ditambahkan ke kosakata
+    matches: int
+    segments_changed: int
+
+
+class DictionaryVariant(BaseModel):
+    rule_id: int
+    find: str
+    enabled: bool
+    times_applied: int
+
+
+class DictionaryEntry(BaseModel):
+    word: str
+    glossary_id: int | None  # terisi = dikenali Whisper (hotwords)
+    variants: list[DictionaryVariant]

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
+  ApiError,
   isProcessing,
   LANGUAGES,
   languageLabel,
@@ -331,7 +332,6 @@ function TranscriptWorkspace({ m, setM, run }: { m: MeetingDetail; setM: (m: Mee
   const [showReplace, setShowReplace] = useState(false);
   const [replaceWith, setReplaceWith] = useState("");
   const [wholeWord, setWholeWord] = useState(true);
-  const [addToGlossary, setAddToGlossary] = useState(true);
   const [remember, setRemember] = useState(true);
   const [replacing, setReplacing] = useState(false);
 
@@ -354,8 +354,24 @@ function TranscriptWorkspace({ m, setM, run }: { m: MeetingDetail; setM: (m: Mee
     if (!confirm(`Ganti ${matchCount} kemunculan "${find}" menjadi "${repl || "(kosong)"}"?`)) return;
     setReplacing(true);
     await run(async () => {
-      await api.replaceText(m.id, { find, replace: repl, whole_word: wholeWord, remember: remember && !!repl });
-      if (addToGlossary && repl) await api.addGlossary(repl);
+      let learned = false;
+      if (remember && repl) {
+        // Satu aksi: ganti di meeting ini + ingat di Kamus tim (nama/singkatan otomatis dikenali Whisper)
+        try {
+          await api.learn({ find, replace: repl, meeting_id: m.id, whole_word: wholeWord });
+          learned = true;
+        } catch (e) {
+          if (!(e instanceof ApiError && e.status === 409)) throw e;
+          const question =
+            `"${find}" adalah kata yang sangat umum. Tetap ingat untuk SEMUA meeting berikutnya?\n\n` +
+            "OK = ingat · Batal = ganti di meeting ini saja";
+          if (confirm(question)) {
+            await api.learn({ find, replace: repl, meeting_id: m.id, whole_word: wholeWord, confirm_common: true });
+            learned = true;
+          }
+        }
+      }
+      if (!learned) await api.replaceText(m.id, { find, replace: repl, whole_word: wholeWord });
       setM(await api.getMeeting(m.id));
       setQuery(repl);
     });
@@ -450,18 +466,14 @@ function TranscriptWorkspace({ m, setM, run }: { m: MeetingDetail; setM: (m: Mee
                 <label className="flex items-center gap-1.5">
                   <input type="checkbox" checked={wholeWord} onChange={(e) => setWholeWord(e.target.checked)} /> Kata utuh saja
                 </label>
-                <label className="flex items-center gap-1.5" title="Agar Whisper menulis kata ini dengan benar di meeting berikutnya">
-                  <input type="checkbox" checked={addToGlossary} onChange={(e) => setAddToGlossary(e.target.checked)} /> Tambahkan kata
-                  yang benar ke Kosakata tim
-                </label>
-                <label className="flex items-center gap-1.5" title="Koreksi yang sama otomatis diterapkan ke transkrip meeting berikutnya">
-                  <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Ingat koreksi ini
-                  untuk meeting berikutnya
+                <label className="flex items-center gap-1.5" title="Diterapkan otomatis ke meeting berikutnya; nama/singkatan juga dikenali Whisper">
+                  <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Ingat di Kamus tim
+                  <span className="text-neutral-500">(nama/singkatan otomatis 🎧 dikenali Whisper)</span>
                 </label>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-neutral-200 pt-2 text-xs text-neutral-500 dark:border-neutral-800">
                 <span>
-                  Koreksi yang sudah diingat bisa dikelola di <Link href="/kosakata" className="underline">Kosakata &amp; koreksi</Link>.
+                  Koreksi yang sudah diingat bisa dikelola di <Link href="/kamus" className="underline">Periksa &amp; Kamus</Link>.
                 </span>
                 <button
                   className="rounded-lg border border-neutral-300 px-2.5 py-1 hover:bg-neutral-100 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"

@@ -30,9 +30,13 @@ from app.schemas import (
     CorrectionRuleIn,
     CorrectionRuleOut,
     CorrectionRuleUpdate,
+    DictionaryEntry,
+    DictionaryVariant,
     DismissIn,
     GlossaryTermIn,
     GlossaryTermOut,
+    LearnIn,
+    LearnOut,
     MeetingDetail,
     MeetingReviewStat,
     MeetingSummary,
@@ -55,6 +59,8 @@ from app.services.corrections import (
     apply_rules,
     build_pattern,
     edit_pairs,
+    is_common,
+    is_name_like,
     new_terms,
     normalize_term,
     replace_in_text,
@@ -362,24 +368,21 @@ def edit_segment(segment_id: int, body: SegmentUpdate, db: Session = Depends(get
     return _get_meeting(db, m.id, full=True)
 
 
-@app.post("/meetings/{meeting_id}/replace", response_model=ReplaceResult)
-def replace_text(meeting_id: int, body: ReplaceRequest, db: Session = Depends(get_db)) -> ReplaceResult:
-    """Cari & ganti kata di seluruh transkrip (mis. 'CSILC' → 'CS ALC'). dry_run=true hanya menghitung."""
-    m = _get_meeting(db, meeting_id)
-    pattern = build_pattern(body.find, match_case=body.match_case, whole_word=body.whole_word)
-    replacement = body.replace.strip()
+def _replace_in_meeting(
+    db: Session, m: Meeting, find: str, replacement: str, *, whole_word: bool = True, match_case: bool = False,
+    dry_run: bool = False,
+) -> tuple[int, int]:
+    """Ganti kata di semua kalimat meeting. Kembalikan (jumlah kemunculan, jumlah kalimat berubah). Belum commit."""
+    pattern = build_pattern(find, match_case=match_case, whole_word=whole_word)
     matches = changed = 0
-    segs = db.scalars(select(TranscriptSegment).where(TranscriptSegment.meeting_id == m.id))
-    for seg in segs:
+    for seg in db.scalars(select(TranscriptSegment).where(TranscriptSegment.meeting_id == m.id)):
         new, n = replace_in_text(seg.text, pattern, replacement)
         if not n:
             continue
         matches += n
         new = " ".join(new.split())
-        if body.dry_run or new == seg.text:
+        if dry_run or new == seg.text or not new:  # jangan sampai kalimat jadi kosong
             continue
-        if not new:
-            continue  # jangan sampai kalimat jadi kosong
         if seg.original_text is None:
             seg.original_text = seg.text
         seg.text = new
@@ -387,6 +390,17 @@ def replace_text(meeting_id: int, body: ReplaceRequest, db: Session = Depends(ge
         if seg.original_text == new:
             seg.original_text = None
         changed += 1
+    return matches, changed
+
+
+@app.post("/meetings/{meeting_id}/replace", response_model=ReplaceResult)
+def replace_text(meeting_id: int, body: ReplaceRequest, db: Session = Depends(get_db)) -> ReplaceResult:
+    """Cari & ganti kata di seluruh transkrip (mis. 'CSILC' → 'CS ALC'). dry_run=true hanya menghitung."""
+    m = _get_meeting(db, meeting_id)
+    replacement = body.replace.strip()
+    matches, changed = _replace_in_meeting(
+        db, m, body.find, replacement, whole_word=body.whole_word, match_case=body.match_case, dry_run=body.dry_run
+    )
     if not body.dry_run and body.remember and replacement and matches:
         _upsert_rule(db, body.find.strip(), replacement, whole_word=body.whole_word, match_case=body.match_case)
     if not body.dry_run:
@@ -519,12 +533,15 @@ def suggestions(db: Session = Depends(get_db)) -> Suggestions:
         .order_by(TranscriptSegment.id.desc())
         .limit(5000)
     )
+    rules = list(db.scalars(select(CorrectionRule).where(CorrectionRule.enabled)))
     for seg in edited:
-        for term in new_terms(seg.original_text, seg.text):
+        # Bagian yang sudah dijelaskan Kamus (mis. hasil "Perbaiki" yang diingat) bukan saran baru
+        original = apply_rules(seg.original_text, rules)[0] if rules else seg.original_text
+        for term in new_terms(original, seg.text):
             if term.lower() in glossary or ("term", term.lower()) in dismissed:
                 continue
             terms.setdefault(term.lower(), [term, 0, seg.text])[1] += 1
-        for old, new in edit_pairs(seg.original_text, seg.text):
+        for old, new in edit_pairs(original, seg.text):
             if old.lower() in rule_finds or ("rule", f"{old}→{new}".lower()) in dismissed:
                 continue
             pairs.setdefault((old.lower(), new.lower()), [old, new, 0, seg.text])[2] += 1
@@ -591,3 +608,68 @@ def review_stats(db: Session = Depends(get_db)) -> ReviewStats:
         reviewed_segments_total=sum(s.reviewed_segments for s in stats),
         training=dataset_stats(),
     )
+
+
+# ---------- Perbaiki pintar + Kamus tim (kosakata & memori koreksi dalam satu daftar) ----------
+
+@app.post("/learn", response_model=LearnOut)
+def learn(body: LearnIn, db: Session = Depends(get_db)) -> LearnOut:
+    """Satu aksi "Perbaiki": sistem memutuskan sendiri ke mana koreksi disimpan.
+
+    - selalu → memori koreksi ("salah → benar", diterapkan ke transkrip berikutnya)
+    - kata benar berupa nama/singkatan → juga kosakata Whisper (hotwords) agar terdengar benar dari awal
+    - kata salah terlalu umum ("tuh", "ini") → 409, minta konfirmasi user dulu
+    - opsional: langsung ganti di seluruh meeting yang sedang dibuka
+    """
+    find, replacement = normalize_term(body.find), normalize_term(body.replace)
+    if not find or not replacement or (find == replacement):
+        raise HTTPException(422, "Kata salah dan kata benar harus diisi dan berbeda")
+    if is_common(find) and not body.confirm_common:
+        raise HTTPException(409, f"'{find}' adalah kata yang sangat umum — yakin ingin selalu menggantinya?")
+
+    rule = _upsert_rule(db, find, replacement, whole_word=body.whole_word)
+    glossary_added = False
+    in_glossary = db.scalar(select(GlossaryTerm).where(func.lower(GlossaryTerm.term) == replacement.lower()))
+    if in_glossary is None and is_name_like(replacement):
+        db.add(GlossaryTerm(term=replacement))
+        glossary_added = True
+    matches = changed = 0
+    if body.meeting_id is not None and body.apply_to_meeting:
+        m = _get_meeting(db, body.meeting_id)
+        matches, changed = _replace_in_meeting(db, m, find, replacement, whole_word=body.whole_word)
+        if changed:
+            db.flush()
+            _recompute_stats(db, m)
+    db.commit()
+    return LearnOut(
+        rule_id=rule.id, heard_by_whisper=glossary_added or in_glossary is not None, glossary_added=glossary_added,
+        matches=matches, segments_changed=changed,
+    )
+
+
+@app.get("/dictionary", response_model=list[DictionaryEntry])
+def dictionary(db: Session = Depends(get_db)) -> list[DictionaryEntry]:
+    """Kamus tim: setiap kata benar + apakah dikenali Whisper + daftar variasi salah dengarnya."""
+    entries: dict[str, DictionaryEntry] = {}
+
+    def entry(word: str) -> DictionaryEntry:
+        return entries.setdefault(word.lower(), DictionaryEntry(word=word, glossary_id=None, variants=[]))
+
+    for g in db.scalars(select(GlossaryTerm)):
+        entry(g.term).glossary_id = g.id
+    for r in db.scalars(select(CorrectionRule).order_by(CorrectionRule.find)):
+        entry(r.replace).variants.append(
+            DictionaryVariant(rule_id=r.id, find=r.find, enabled=r.enabled, times_applied=r.times_applied)
+        )
+    return sorted(entries.values(), key=lambda e: e.word.lower())
+
+
+@app.delete("/dictionary", status_code=204)
+def delete_dictionary_word(word: str, db: Session = Depends(get_db)) -> None:
+    """Hapus satu kata dari Kamus: kosakatanya dan semua variasi salah dengarnya."""
+    w = word.strip().lower()
+    for g in db.scalars(select(GlossaryTerm).where(func.lower(GlossaryTerm.term) == w)):
+        db.delete(g)
+    for r in db.scalars(select(CorrectionRule).where(func.lower(CorrectionRule.replace) == w)):
+        db.delete(r)
+    db.commit()

@@ -103,6 +103,22 @@ export interface ReviewStats {
   training: { usable_segments: number; usable_minutes: number; target_hours: number; progress_pct: number };
 }
 
+export interface LearnResult {
+  rule_id: number;
+  /** Kata benar ada di kosakata Whisper (nama/singkatan). */
+  heard_by_whisper: boolean;
+  glossary_added: boolean;
+  matches: number;
+  segments_changed: number;
+}
+
+export interface DictionaryEntry {
+  word: string;
+  /** Terisi = dikenali Whisper (hotwords). */
+  glossary_id: number | null;
+  variants: { rule_id: number; find: string; enabled: boolean; times_applied: number }[];
+}
+
 export interface GlossaryTerm {
   id: number;
   term: string;
@@ -130,6 +146,16 @@ export const LANGUAGES = [
 export const languageLabel = (code: string | null | undefined) =>
   LANGUAGES.find((l) => l.code === code)?.label ?? code ?? "–";
 
+/** Error dari API, membawa kode status (mis. 409 = perlu konfirmasi). */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -142,7 +168,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       const j = await res.json();
       if (typeof j.detail === "string") msg = j.detail;
     } catch {}
-    throw new Error(msg);
+    throw new ApiError(msg, res.status);
   }
   return (res.status === 204 ? undefined : await res.json()) as T;
 }
@@ -194,6 +220,18 @@ export const api = {
   reviewSegment: (segmentId: number, reviewed = true) =>
     request<Segment>(`/segments/${segmentId}/review`, { method: "POST", body: JSON.stringify({ reviewed }) }),
   reviewStats: () => request<ReviewStats>("/review/stats"),
+  /** Satu aksi "Perbaiki": ingat koreksi, nama/singkatan otomatis jadi kosakata Whisper. 409 = kata terlalu umum. */
+  learn: (body: {
+    find: string;
+    replace: string;
+    meeting_id?: number;
+    apply_to_meeting?: boolean;
+    whole_word?: boolean;
+    confirm_common?: boolean;
+  }) => request<LearnResult>("/learn", { method: "POST", body: JSON.stringify(body) }),
+  dictionary: () => request<DictionaryEntry[]>("/dictionary"),
+  deleteDictionaryWord: (word: string) =>
+    request<void>(`/dictionary?word=${encodeURIComponent(word)}`, { method: "DELETE" }),
   dismissSuggestion: (kind: "term" | "rule", value: string) =>
     request<void>("/suggestions/dismiss", { method: "POST", body: JSON.stringify({ kind, value }) }),
   audioUrl: (id: number) => `${API_URL}/meetings/${id}/audio`,

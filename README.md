@@ -45,38 +45,34 @@ Dokumentasi API: http://localhost:8000/docs.
 
 Pertama kali memproses, worker mengunduh model (±3 GB total) ke cache Hugging Face — sekali saja.
 
-### Memperbaiki kata yang salah
-- **Edit satu kalimat:** arahkan kursor ke kalimat → klik **✎ Edit** → Enter untuk simpan. Teks asli AI tetap tersimpan (tanda *diedit*, bisa *Kembalikan teks asli*).
-- **Ganti kata di seluruh transkrip:** klik **Ganti kata**, isi kata yang salah & yang benar → **Ganti semua**.
-- **Kosakata tim** (menu *Kosakata & koreksi*): daftar nama orang, singkatan, istilah. Whisper memprioritaskan ejaan ini
-  untuk meeting yang diproses berikutnya — mencegah kesalahan yang sama terulang.
+### Periksa & Kamus (cara mengajari sistem)
+Menu **Periksa & Kamus**, atau tombol **Periksa & koreksi** di halaman meeting.
 
-### Periksa & koreksi (cara termudah mengajari sistem)
-Di halaman meeting klik **Periksa & koreksi**, atau buka **Kosakata & koreksi → Periksa transkrip**.
-Satu kalimat tampil sekali, audionya langsung diputar:
-- **Kata salah?** Blok/seleksi kata itu → isi kata yang benar → *Terapkan* (bisa sekaligus diganti di seluruh meeting,
-  diingat untuk meeting berikutnya, dan masuk Kosakata tim).
+**Periksa transkrip** — satu kalimat tampil sekali, audionya langsung diputar:
+- **Kata salah?** Blok/seleksi kata itu → ketik yang benar → **Perbaiki**. Satu tombol, sistem yang mengatur:
+  - selalu **diingat di Kamus tim** → otomatis dibetulkan di transkrip meeting berikutnya;
+  - kalau kata benarnya **nama/singkatan** (mis. "ALC", "Rio") → juga **🎧 dikenali Whisper** saat mendengar;
+  - kalau kata salahnya **sangat umum** (mis. "tuh", "ini") → kamu ditanya dulu; pilihan aman: *perbaiki kalimat ini saja*;
+  - centang *Ganti juga di seluruh meeting ini* untuk langsung membetulkan semua kemunculannya.
 - **Kata terlewat?** Ketik langsung di kotak teks.
-- **Siapa yang bicara?** Isi nama di kotak *Siapa yang bicara ini?* (berlaku untuk semua kalimat orang itu),
-  atau *Bukan dia? Pindahkan ke…* untuk satu kalimat.
+- **Siapa yang bicara?** Isi *Siapa yang bicara ini?* (berlaku untuk semua kalimat orang itu), atau *Bukan dia? Pindahkan ke…*.
 - **Enter** = benar/simpan & lanjut · Shift+Enter = baris baru · Esc = batalkan · Alt+P = putar ulang · Alt+←/→ = pindah.
 - Kalimat yang disetujui ditandai **✓ sudah diperiksa** — hanya kalimat ini yang dipakai untuk set uji & data latihan.
 
+**Kamus tim** — satu daftar berisi setiap kata yang benar, apakah **🎧 dikenali Whisper** (klik untuk on/off; idealnya
+≤ 60 kata, utamakan nama & singkatan), dan **variasi salah dengarnya** (klik untuk nonaktifkan, × untuk hapus).
+Tambah manual untuk nama klien baru *sebelum* meeting-nya diproses. **Saran** dari editan manual muncul di atas Kamus.
+
+Di transkrip biasa juga bisa: **✎ Edit** per kalimat, atau **Ganti kata** (opsi *Ingat di Kamus tim*).
+Untuk meeting lama: *Ganti kata* → **Terapkan memori koreksi**. Jumlah koreksi otomatis tercatat di **Detail proses**.
+
 ### Data latihan (untuk melatih ulang Whisper kelak)
 ```powershell
-cd appsapi
-.venvScriptspython -m app.dataset stats                        # berapa menit sudah terperiksa (target ±10 jam)
-.venvScriptspython -m app.dataset export --dest "D:dataset-nym"
+cd apps\api
+.venv\Scripts\python -m app.dataset stats                          # berapa menit sudah terperiksa (target ±10 jam)
+.venv\Scripts\python -m app.dataset export --dest "D:\dataset-nym"
 ```
 Hasil: `audio/*.wav` + `metadata.jsonl` (format audiofolder Hugging Face), hanya dari kalimat bertanda ✓.
-
-### Sistem belajar dari koreksimu
-- **Memori koreksi:** saat *Ganti kata* dengan opsi **Ingat koreksi ini** (default aktif), pasangan "salah → benar"
-  disimpan dan **otomatis diterapkan** ke setiap transkrip baru (kalimatnya bertanda *otomatis*, teks asli tetap tersimpan).
-  Untuk meeting lama: *Ganti kata* → **Terapkan memori koreksi**. Kelola (aktif/nonaktif/hapus) di *Kosakata & koreksi*.
-- **Saran otomatis:** dari kalimat yang kamu edit, halaman *Kosakata & koreksi* menyarankan istilah baru untuk Kosakata tim
-  dan pola "salah → benar" untuk memori koreksi. Cek dulu sebelum menerima — kata umum (mis. "tuh") jangan diganti otomatis.
-- Jumlah koreksi otomatis per meeting tercatat di **Detail proses** (`auto_corrections`).
 
 ### Membatalkan proses
 Di halaman meeting yang sedang diproses, klik **Batalkan**. Worker berhenti di titik cek berikutnya

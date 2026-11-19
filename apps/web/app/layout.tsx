@@ -24,8 +24,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <Link href="/" className="hover:text-neutral-900 dark:hover:text-neutral-100">
                 Meeting
               </Link>
-              <Link href="/kosakata" className="hover:text-neutral-900 dark:hover:text-neutral-100">
-                Kosakata &amp; koreksi
+              <Link href="/kamus" className="hover:text-neutral-900 dark:hover:text-neutral-100">
+                Periksa &amp; Kamus
               </Link>
             </nav>
           </div>

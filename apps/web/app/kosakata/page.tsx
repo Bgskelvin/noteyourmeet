@@ -1,7 +1,6 @@
-import { GlossaryManager } from "@/components/GlossaryManager";
+import { redirect } from "next/navigation";
 
-export const metadata = { title: "Kosakata & koreksi · NoteYourMeet" };
-
-export default function GlossaryPage() {
-  return <GlossaryManager />;
+// Halaman lama "Kosakata & koreksi" kini digabung ke "Periksa & Kamus"
+export default function OldGlossaryPage() {
+  redirect("/kamus");
 }

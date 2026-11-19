@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type MeetingDetail, type Segment, type Speaker } from "@/lib/api";
+import { api, ApiError, type LearnResult, type MeetingDetail, type Segment, type Speaker } from "@/lib/api";
 import { clock, speakerColor } from "@/lib/format";
 
 /**
@@ -168,7 +168,7 @@ function ReviewWorkspace({
       {allDone && (
         <div className="rounded-xl bg-emerald-50 p-4 text-sm text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
           🎉 Semua kalimat di meeting ini sudah diperiksa. Terima kasih — data ini sekarang bisa dipakai untuk set uji &amp;
-          latihan model. <Link href="/kosakata" className="underline">Lihat ringkasannya</Link>.
+          latihan model. <Link href="/kamus" className="underline">Lihat ringkasannya</Link>.
         </div>
       )}
 
@@ -268,37 +268,41 @@ function ReviewWorkspace({
             m={m}
             sel={sel}
             busy={busy}
-            onApply={async ({ replacement, remember, wholeMeeting, toGlossary }) => {
+            onApply={async ({ replacement, wholeMeeting, mode }) => {
+              // mode: "learn" = perbaiki & ingat · "confirm" = ingat walau kata umum · "local" = kalimat ini saja
               const before = draft.slice(0, sel.start);
               const after = draft.slice(sel.end);
-              const lead = draft.slice(sel.start, sel.end).match(/^\s*/)?.[0] ?? "";
-              const trail = draft.slice(sel.start, sel.end).match(/\s*$/)?.[0] ?? "";
-              const newDraft = `${before}${lead}${replacement}${trail}${after}`;
-              const wholeWord = !/[\p{L}\p{N}]$/u.test(before + lead) && !/^[\p{L}\p{N}]/u.test(trail + after);
-              const res = await act(async () => {
-                let changedElsewhere = 0;
-                if (wholeMeeting) {
-                  const r = await api.replaceText(m.id, { find: sel.text, replace: replacement, whole_word: wholeWord, remember });
-                  changedElsewhere = r.segments_changed;
-                } else if (remember) {
-                  await api.addCorrection(sel.text, replacement);
+              const newDraft = `${before}${replacement}${after}`;
+              const wholeWord = !/[\p{L}\p{N}]$/u.test(before) && !/^[\p{L}\p{N}]/u.test(after);
+              let result: LearnResult | null = null;
+              if (mode !== "local") {
+                setBusy(true);
+                try {
+                  result = await api.learn({
+                    find: sel.text, replace: replacement, meeting_id: m.id, apply_to_meeting: wholeMeeting,
+                    whole_word: wholeWord, confirm_common: mode === "confirm",
+                  });
+                  if (wholeMeeting && result.segments_changed) setM(await api.getMeeting(m.id));
+                } catch (e) {
+                  if (e instanceof ApiError && e.status === 409) return "common";
+                  alert((e as Error).message);
+                  return "error";
+                } finally {
+                  setBusy(false);
                 }
-                if (toGlossary) await api.addGlossary(replacement);
-                return { changedElsewhere, fresh: wholeMeeting ? await api.getMeeting(m.id) : null };
-              });
-              if (!res) return;
-              if (res.fresh) setM(res.fresh);
+              }
               setDraft(newDraft);
               setSel(null);
               flash(
                 [
                   `“${sel.text}” → “${replacement}”`,
-                  wholeMeeting && res.changedElsewhere ? `diganti di ${res.changedElsewhere} kalimat` : null,
-                  remember ? "diingat untuk meeting berikutnya" : null,
-                  toGlossary ? "masuk Kosakata tim" : null,
+                  result && wholeMeeting && result.segments_changed ? `diganti di ${result.segments_changed} kalimat` : null,
+                  result ? "diingat di Kamus tim" : "hanya di kalimat ini",
+                  result?.glossary_added ? "🎧 dikenali Whisper mulai meeting berikutnya" : null,
                 ].filter(Boolean).join(" · "),
               );
               taRef.current?.focus();
+              return "ok";
             }}
             onCancel={() => setSel(null)}
           />
@@ -433,32 +437,40 @@ function SpeakerBox({
   );
 }
 
+type FixMode = "learn" | "confirm" | "local";
+
 function WordFix({
   m, sel, busy, onApply, onCancel,
 }: {
   m: MeetingDetail;
   sel: { start: number; end: number; text: string };
   busy: boolean;
-  onApply: (o: { replacement: string; remember: boolean; wholeMeeting: boolean; toGlossary: boolean }) => void;
+  onApply: (o: { replacement: string; wholeMeeting: boolean; mode: FixMode }) => Promise<"ok" | "common" | "error">;
   onCancel: () => void;
 }) {
   const [replacement, setReplacement] = useState(sel.text);
-  const [remember, setRemember] = useState(true);
   const [wholeMeeting, setWholeMeeting] = useState(true);
-  const [toGlossary, setToGlossary] = useState(false);
+  const [askCommon, setAskCommon] = useState(false);
   const occurrences = useMemo(() => {
     const esc = sel.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const re = new RegExp(`(?<![\\p{L}\\p{N}_])${esc}(?![\\p{L}\\p{N}_])`, "giu");
     return m.segments.reduce((n, s) => n + (s.text.match(re)?.length ?? 0), 0);
   }, [m.segments, sel.text]);
-  const changed = replacement.trim() && replacement.trim() !== sel.text;
+  const value = replacement.trim();
+  const changed = !!value && value !== sel.text;
+
+  async function submit(mode: FixMode) {
+    if (!changed) return;
+    const r = await onApply({ replacement: value, wholeMeeting: mode === "local" ? false : wholeMeeting, mode });
+    if (r === "common") setAskCommon(true);
+  }
 
   return (
     <form
       className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950/30"
       onSubmit={(e) => {
         e.preventDefault();
-        if (changed) onApply({ replacement: replacement.trim(), remember, wholeMeeting, toGlossary });
+        submit("learn");
       }}
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -469,29 +481,48 @@ function WordFix({
           autoFocus
           className="min-w-32 flex-1 rounded-lg border border-neutral-300 bg-[var(--background)] px-2 py-1 dark:border-neutral-700"
           value={replacement}
-          onChange={(e) => setReplacement(e.target.value)}
+          onChange={(e) => {
+            setReplacement(e.target.value);
+            setAskCommon(false);
+          }}
           onFocus={(e) => e.currentTarget.select()}
           onKeyDown={(e) => e.key === "Escape" && onCancel()}
+          disabled={busy}
         />
         <button className="rounded-lg bg-amber-600 px-3 py-1 font-medium text-white disabled:opacity-40" disabled={busy || !changed}>
-          Terapkan
+          Perbaiki
         </button>
         <button type="button" className="text-xs text-neutral-500 underline" onClick={onCancel}>
           batal
         </button>
       </div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-700 dark:text-neutral-300">
-        <label className="flex items-center gap-1.5">
-          <input type="checkbox" checked={wholeMeeting} onChange={(e) => setWholeMeeting(e.target.checked)} /> Ganti juga di seluruh
-          meeting ini ({occurrences}×)
-        </label>
-        <label className="flex items-center gap-1.5" title="Koreksi ini otomatis diterapkan ke transkrip meeting berikutnya">
-          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Ingat untuk meeting berikutnya
-        </label>
-        <label className="flex items-center gap-1.5" title="Nama/istilah: Whisper akan memprioritaskan ejaan ini">
-          <input type="checkbox" checked={toGlossary} onChange={(e) => setToGlossary(e.target.checked)} /> Tambah ke Kosakata tim
-        </label>
-      </div>
+
+      {askCommon ? (
+        <div className="space-y-2 rounded-md bg-amber-100 p-2 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
+          <p>
+            ⚠️ <strong>“{sel.text}”</strong> adalah kata yang sangat umum. Kalau diingat, <em>semua</em> “{sel.text}” di meeting
+            berikutnya ikut berubah menjadi “{value}” — bisa merusak kalimat lain.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="rounded bg-amber-700 px-2.5 py-1 font-medium text-white" disabled={busy} onClick={() => submit("local")}>
+              Perbaiki kalimat ini saja (disarankan)
+            </button>
+            <button type="button" className="rounded border border-amber-700 px-2.5 py-1" disabled={busy} onClick={() => submit("confirm")}>
+              Tetap ingat untuk semua meeting
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-700 dark:text-neutral-300">
+          <label className="flex items-center gap-1.5">
+            <input type="checkbox" checked={wholeMeeting} onChange={(e) => setWholeMeeting(e.target.checked)} /> Ganti juga di
+            seluruh meeting ini ({occurrences}×)
+          </label>
+          <span className="text-neutral-500">
+            Otomatis diingat di <strong>Kamus tim</strong>; nama/singkatan juga 🎧 dikenali Whisper.
+          </span>
+        </div>
+      )}
     </form>
   );
 }
