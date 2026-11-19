@@ -360,7 +360,7 @@ Catatan teknis Claude API (per Nov 2026):
 - [x] Kalimat terbelah antar pembicara: `absorb_short_runs()` — 1 kalimat Whisper = 1 pembicara; potongan pendek (<3 kata atau <0,7 dtk) di awal/akhir kalimat ikut tetangga, 1 kata yang diapit pembicara sama ikut; obrolan cepat di tengah tetap dipisah. Uji 5 menit rekaman user: 49 → 34 potongan, "Gak | pada puasa", "Kita | buka dulu", "pas / sesi / online" beres. Meeting lama perlu *Proses ulang*
 - [x] Worker menyimpan `transcription.json` (kata + speaker mentah) per meeting → kelak bisa "rapikan ulang pembicara" tanpa GPU
 - [x] Fondasi pengembangan: log ke file (`data/logs`), backup (`python -m app.backup`), resep pemrosesan per meeting (`processing_info` + "Detail proses" di UI), set uji kualitas (`python -m app.evaluate`: WER & salah pembicara, `--cached` tanpa GPU)
-- [ ] Push repo ke GitHub (private) — menunggu user membuat repo
+- [x] Push repo ke GitHub (private) `Bgskelvin/noteyourmeet`, branch `main`; riwayat dicek bersih dari .env/token/data
 - [ ] User membuat set uji: 2–3 potongan ±5 menit yang sudah dikoreksi, lalu `evaluate run --note baseline`
 - [ ] Auth invite-only (wajib sebelum online)
 
@@ -391,10 +391,10 @@ Catatan teknis Claude API (per Nov 2026):
 
 ## 10. Status & Langkah Berikutnya  ← UPDATE BAGIAN INI SETIAP SESI
 
-**Tanggal update terakhir:** 2026-11-18
+**Tanggal update terakhir:** 2026-11-19
 **Status:** Fase 1 (audio → teks + siapa bicara) selesai & terbukti jalan di GPU (GTX 1660 Ti, CUDA). `HF_TOKEN` sudah diisi user. Cara jalan: [README.md](README.md) (`start-dev.ps1`).
 
-Fitur Fase 1 lengkap: upload + bahasa per meeting, progres real-time, **batalkan**, proses ulang, transkrip + pembicara (rename/gabung/pindah kalimat), statistik. Kode sudah di-commit ke git (branch `master`).
+Fitur Fase 1 lengkap: upload + bahasa per meeting, progres real-time, **batalkan**, proses ulang, transkrip + pembicara (rename/gabung/pindah kalimat), statistik. Kode di git branch `main`, tersimpan di GitHub **private**: https://github.com/Bgskelvin/noteyourmeet (CI jalan otomatis tiap push).
 
 **Alur kerja pengembangan** (detail: README → "Alur kerja pengembangan"): masalah/ide → cek log + Detail proses → perbaiki + tambah test → ukur dengan `app.evaluate` → commit + push (CI) → catat di dokumen ini.
 
@@ -416,7 +416,7 @@ Fitur Fase 1 lengkap: upload + bahasa per meeting, progres real-time, **batalkan
 **Yang perlu disiapkan user:**
 - [ ] API key Anthropic (console.anthropic.com)
 - [x] Akun & token Hugging Face (sudah, model `pyannote/speaker-diarization-community-1`)
-- [ ] Akun GitHub + repo **private** kosong (untuk backup kode & CI)
+- [x] Akun GitHub + repo private (`Bgskelvin/noteyourmeet`)
 - [ ] (Nanti, saat deploy) Docker Desktop (WSL2) — belum perlu selama jalan native
 - [ ] (Saat deploy) akun Cloudflare + domain (bisa domain murah)
 
